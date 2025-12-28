@@ -42,7 +42,12 @@ jobs:
 
   phpstan:
     runs-on: ubuntu-latest
-    name: PHPStan
+    name: PHPStan (Laravel ${{ matrix.laravel }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        laravel: [11.*, 12.*]
 
     steps:
       - name: Checkout code
@@ -51,12 +56,14 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: 8.2
+          php-version: 8.3
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
 
       - name: Install dependencies
-        run: composer update --prefer-dist --no-interaction --no-progress
+        run: |
+          composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
+          composer update --prefer-dist --no-interaction --no-progress
 
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse --no-progress
