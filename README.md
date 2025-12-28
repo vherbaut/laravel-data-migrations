@@ -162,8 +162,8 @@ class FixUserEmailsSeeder extends Seeder
 
 ## Requirements
 
-- PHP 8.1 or higher
-- Laravel 10.x or 11.x
+- PHP 8.2 or higher
+- Laravel 10.x, 11.x, or 12.x
 - A supported database (MySQL, PostgreSQL, SQLite, SQL Server)
 
 ---
