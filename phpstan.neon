@@ -1,0 +1,11 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - src
+    level: 5
+    checkMissingIterableValueType: true
+    checkGenericClassInNonGenericObjectType: true
+    parallel:
+        maximumNumberOfProcesses: 1

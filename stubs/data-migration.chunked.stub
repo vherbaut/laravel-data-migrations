@@ -1,0 +1,96 @@
+<?php
+
+use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration
+{
+    /**
+     * Description of what this migration does.
+     */
+    protected string $description = '{{ description }}';
+
+    /**
+     * Tables affected by this migration.
+     */
+    protected array $affectedTables = ['{{ table }}'];
+
+    /**
+     * Whether this migration is idempotent (safe to run multiple times).
+     */
+    protected bool $idempotent = {{ idempotent }};
+
+    /**
+     * Chunk size for processing.
+     */
+    protected int $chunkSize = 1000;
+
+    /**
+     * Disable transaction for large dataset.
+     */
+    protected bool $withinTransaction = false;
+
+    /**
+     * Run the data migration.
+     */
+    public function up(): void
+    {
+        $total = $this->getEstimatedRows() ?? 0;
+
+        if ($total > 0) {
+            $this->startProgress($total, "Processing {$total} records...");
+        }
+
+        // Method 1: Using built-in chunk helper
+        $processed = $this->chunk('{{ table }}', function ($record) {
+            // Process each record
+            // DB::table('{{ table }}')
+            //     ->where('id', $record->id)
+            //     ->update(['processed' => true]);
+        });
+
+        // Method 2: Using chunkUpdate for mass updates
+        // $processed = $this->chunkUpdate(
+        //     '{{ table }}',
+        //     ['status' => 'new_value'],
+        //     fn ($query) => $query->where('status', 'old_value')
+        // );
+
+        // Method 3: Manual chunking with cursor (memory efficient)
+        // DB::table('{{ table }}')
+        //     ->where('needs_migration', true)
+        //     ->orderBy('id')
+        //     ->lazy($this->chunkSize)
+        //     ->each(function ($record) {
+        //         // Process record
+        //         $this->incrementProgress();
+        //         $this->affected();
+        //     });
+
+        if ($total > 0) {
+            $this->finishProgress();
+        }
+
+        $this->affected($processed);
+        $this->log("Processed {$processed} records");
+    }
+
+    /**
+     * Reverse the data migration.
+     */
+    public function down(): void
+    {
+        // Optional: Implement if this migration is reversible
+        // Be careful with large datasets - consider chunking the rollback too
+    }
+
+    /**
+     * Get estimated number of affected rows.
+     */
+    public function getEstimatedRows(): ?int
+    {
+        return DB::table('{{ table }}')
+            // ->where('needs_migration', true)
+            ->count();
+    }
+};

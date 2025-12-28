@@ -1,0 +1,68 @@
+{
+    "name": "vherbaut/laravel-data-migrations",
+    "description": "Versioned data migrations for Laravel - transform, backfill, and migrate your data with the same elegance as schema migrations.",
+    "keywords": ["laravel", "migrations", "data", "transform", "backfill", "etl"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Vincent Herbaut",
+            "email": "vincenth.lzh@gmail.com"
+        }
+    ],
+    "homepage": "https://github.com/vherbaut/laravel-data-migrations",
+    "support": {
+        "issues": "https://github.com/vherbaut/laravel-data-migrations/issues",
+        "source": "https://github.com/vherbaut/laravel-data-migrations"
+    },
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0",
+        "illuminate/database": "^10.0|^11.0",
+        "illuminate/console": "^10.0|^11.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0",
+        "pestphp/pest": "^2.0",
+        "phpstan/phpstan": "^1.10",
+        "larastan/larastan": "^2.0",
+        "laravel/pint": "^1.26"
+    },
+    "autoload": {
+        "psr-4": {
+            "Vherbaut\\DataMigrations\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Vherbaut\\DataMigrations\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Vherbaut\\DataMigrations\\DataMigrationsServiceProvider"
+            ],
+            "aliases": {
+                "DataMigrations": "Vherbaut\\DataMigrations\\Facades\\DataMigrations"
+            }
+        }
+    },
+    "scripts": {
+        "pint": "pint",
+        "pint:test": "pint --test",
+        "phpstan": "phpstan analyse",
+        "test": "pest",
+        "check": [
+            "@pint:test",
+            "@phpstan",
+            "@test"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}

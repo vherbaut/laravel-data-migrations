@@ -1,0 +1,61 @@
+<?php
+
+use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration
+{
+    /**
+     * Description of what this migration does.
+     */
+    protected string $description = '{{ description }}';
+
+    /**
+     * Tables affected by this migration.
+     */
+    protected array $affectedTables = ['{{ table }}'];
+
+    /**
+     * Whether this migration is idempotent (safe to run multiple times).
+     */
+    protected bool $idempotent = {{ idempotent }};
+
+    /**
+     * Run the data migration.
+     */
+    public function up(): void
+    {
+        // Example: Update records
+        // $affected = DB::table('{{ table }}')
+        //     ->where('status', 'old_value')
+        //     ->update(['status' => 'new_value']);
+        //
+        // $this->affected($affected);
+
+        // Example: Transform data
+        // DB::table('{{ table }}')->whereNull('full_name')->cursor()->each(function ($record) {
+        //     DB::table('{{ table }}')
+        //         ->where('id', $record->id)
+        //         ->update(['full_name' => $record->first_name . ' ' . $record->last_name]);
+        //
+        //     $this->affected();
+        // });
+    }
+
+    /**
+     * Reverse the data migration.
+     */
+    public function down(): void
+    {
+        // Optional: Implement if this migration is reversible
+    }
+
+    /**
+     * Get estimated number of affected rows (for progress bar).
+     */
+    public function getEstimatedRows(): ?int
+    {
+        // return DB::table('{{ table }}')->where('status', 'old_value')->count();
+        return null;
+    }
+};
