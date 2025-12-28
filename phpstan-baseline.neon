@@ -1,0 +1,8 @@
+parameters:
+    ignoreErrors:
+        -
+            identifier: argument.type
+            path: src/Commands/DataMigrateStatusCommand.php
+        -
+            identifier: return.type
+            path: src/Commands/DataMigrateStatusCommand.php

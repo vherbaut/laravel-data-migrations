@@ -97,7 +97,7 @@ class DataMigrateStatusCommand extends Command
             return [
                 'name' => $name,
                 'batch' => $record?->batch,
-                'status' => $record?->status ?? 'pending',
+                'status' => $record !== null ? $record->status : 'pending',
                 'rows' => $record?->rowsAffected,
                 'duration' => $record?->durationMs,
                 'ran_at' => $record?->completedAt?->format('Y-m-d H:i:s'),
