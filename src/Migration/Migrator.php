@@ -87,6 +87,7 @@ class Migrator implements MigratorInterface
      *
      * @param array<string, mixed> $options
      * @return array<int, string>
+     * @throws Throwable
      */
     public function run(array $options = []): array
     {
@@ -120,6 +121,7 @@ class Migrator implements MigratorInterface
      * @param int $batch
      * @param array<string, mixed> $options
      * @return void
+     * @throws Throwable
      */
     public function runMigration(string $file, int $batch, array $options = []): void
     {
@@ -171,6 +173,7 @@ class Migrator implements MigratorInterface
      * @param string $name
      * @param array<string, mixed> $options
      * @return void
+     * @throws Throwable
      */
     protected function runMigrationUp(MigrationInterface $migration, string $name, array $options): void
     {
@@ -308,6 +311,7 @@ class Migrator implements MigratorInterface
      * @param Collection<int, MigrationRecord> $migrations
      * @param array<string, mixed> $options
      * @return array<int, string>
+     * @throws Throwable
      */
     protected function rollbackMigrations(Collection $migrations, array $options = []): array
     {
@@ -322,8 +326,9 @@ class Migrator implements MigratorInterface
                 continue;
             }
 
-            $this->rollbackMigration($migration, $file, $options);
-            $rolledBack[] = $file;
+            if ($this->rollbackMigration($migration, $file, $options)) {
+                $rolledBack[] = $file;
+            }
         }
 
         return $rolledBack;
@@ -335,16 +340,17 @@ class Migrator implements MigratorInterface
      * @param MigrationRecord $migration
      * @param string $file
      * @param array<string, mixed> $options
-     * @return void
+     * @return bool
+     * @throws Throwable
      */
-    protected function rollbackMigration(MigrationRecord $migration, string $file, array $options): void
+    protected function rollbackMigration(MigrationRecord $migration, string $file, array $options): bool
     {
         $instance = $this->resolve($file);
 
         if (! $instance->isReversible()) {
             $this->note("<fg=yellow>Skipping (not reversible):</> {$migration->migration}");
 
-            return;
+            return false;
         }
 
         if ($this->output !== null) {
@@ -372,6 +378,8 @@ class Migrator implements MigratorInterface
 
             $durationMs = (int) ((microtime(true) - $startTime) * 1000);
             $this->note("<info>Rolled back:</info> {$migration->migration} ({$durationMs}ms)");
+
+            return true;
         } catch (Throwable $e) {
             $this->note("<error>Rollback failed:</error> {$migration->migration} - {$e->getMessage()}");
 

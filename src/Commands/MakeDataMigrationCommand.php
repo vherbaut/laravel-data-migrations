@@ -59,7 +59,7 @@ class MakeDataMigrationCommand extends Command
     {
         /** @var string $nameArgument */
         $nameArgument = $this->argument('name');
-        $name = Str::snake(trim($nameArgument));
+        $name = Str::snake(str_replace(' ', '_', trim($nameArgument)));
 
         if (! $this->validateName($name)) {
             return self::FAILURE;

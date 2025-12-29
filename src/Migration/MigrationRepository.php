@@ -87,16 +87,23 @@ class MigrationRepository implements MigrationRepositoryInterface
     }
 
     /**
-     * Get the last migration batch.
+     * Get the last migration batch (only completed/running migrations).
      *
      * @return Collection<int, MigrationRecord>
      */
     public function getLast(): Collection
     {
-        $lastBatch = $this->getLastBatchNumber();
+        $lastBatch = $this->table()
+            ->whereIn('status', ['completed', 'running'])
+            ->max('batch');
+
+        if ($lastBatch === null) {
+            return collect();
+        }
 
         return $this->table()
             ->where('batch', $lastBatch)
+            ->whereIn('status', ['completed', 'running'])
             ->orderByDesc('migration')
             ->get()
             ->map(
@@ -130,6 +137,11 @@ class MigrationRepository implements MigrationRepositoryInterface
      */
     public function logStart(string $migration, int $batch): void
     {
+        $this->table()
+            ->where('migration', $migration)
+            ->whereIn('status', ['failed', 'rolled_back'])
+            ->delete();
+
         $this->table()->insert([
             'migration' => $migration,
             'batch' => $batch,
