@@ -6,6 +6,7 @@ namespace Vherbaut\DataMigrations;
 
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use Spatie\Backup\BackupServiceProvider;
 use Vherbaut\DataMigrations\Commands\DataMigrateCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateFreshCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateRollbackCommand;
@@ -90,7 +91,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
     {
         $this->app->singleton(BackupServiceInterface::class, function (): BackupServiceInterface {
             // Use SpatieBackupService if available, otherwise NullBackupService
-            if (class_exists(\Spatie\Backup\BackupServiceProvider::class)) {
+            if (class_exists(BackupServiceProvider::class)) {
                 return new SpatieBackupService;
             }
 

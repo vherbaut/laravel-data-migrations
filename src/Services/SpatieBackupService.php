@@ -6,6 +6,7 @@ namespace Vherbaut\DataMigrations\Services;
 
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
+use Spatie\Backup\BackupServiceProvider;
 use Throwable;
 use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 
@@ -57,6 +58,6 @@ class SpatieBackupService implements BackupServiceInterface
      */
     public function isAvailable(): bool
     {
-        return class_exists(\Spatie\Backup\BackupServiceProvider::class);
+        return class_exists(BackupServiceProvider::class);
     }
 }

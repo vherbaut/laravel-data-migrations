@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Illuminate\Support\Facades\Schema;
 
 beforeEach(function (): void {
     $this->artisan('migrate');
@@ -50,7 +51,7 @@ it('requires force flag in production', function (): void {
 
 it('fails when migrations table does not exist', function (): void {
     // Drop the migrations table
-    \Illuminate\Support\Facades\Schema::dropIfExists('data_migrations');
+    Schema::dropIfExists('data_migrations');
 
     $this->artisan('data:fresh', ['--force' => true])
         ->expectsOutputToContain('Data migrations table not found')
