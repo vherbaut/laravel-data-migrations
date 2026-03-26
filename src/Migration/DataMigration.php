@@ -6,6 +6,7 @@ namespace Vherbaut\DataMigrations\Migration;
 
 use Illuminate\Console\OutputStyle;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use ReflectionMethod;
@@ -215,7 +216,7 @@ abstract class DataMigration implements MigrationInterface
      *
      * @param string $table
      * @param array<string, mixed> $updates
-     * @param callable(\Illuminate\Database\Query\Builder): void $whereCallback
+     * @param callable(Builder): void $whereCallback
      * @param int|null $chunkSize
      * @return int
      */
