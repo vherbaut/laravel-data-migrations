@@ -25,7 +25,7 @@ class DataMigrateCommand extends Command
     protected $signature = 'data:migrate
                             {--dry-run : Show what would be migrated without actually running}
                             {--force : Force the operation to run in production}
-                            {--step : Run migrations one at a time}
+                            {--step : Force the migrations to be run so they can be rolled back individually}
                             {--no-confirm : Skip row count confirmation}';
 
     /**

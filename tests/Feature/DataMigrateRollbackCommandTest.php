@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 beforeEach(function (): void {
     $this->artisan('migrate');
@@ -269,4 +271,102 @@ PHP;
         ->count();
 
     expect($count)->toBe(1);
+});
+
+it('rollback --step ignores failed and rolled back records', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+    public function down(): void {}
+};
+PHP;
+
+    $filepath = $this->createTestMigration('step_target', $content);
+    $migrationName = pathinfo($filepath, PATHINFO_FILENAME);
+    $this->artisan('data:migrate', ['--force' => true]);
+
+    insertDataMigrationRecord('zzz_failed', 2, 'failed');
+    insertDataMigrationRecord('zzz_rolled_back', 3, 'rolled_back');
+
+    $this->artisan('data:rollback', ['--step' => 1, '--force' => true])
+        ->expectsOutputToContain("Rolled back: {$migrationName}")
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('data_migrations', ['migration' => $migrationName, 'status' => 'rolled_back']);
+    $this->assertDatabaseHas('data_migrations', ['migration' => 'zzz_failed', 'status' => 'failed']);
+    $this->assertDatabaseHas('data_migrations', ['migration' => 'zzz_rolled_back', 'status' => 'rolled_back']);
+});
+
+it('rollback --batch does not run down() again for already rolled back migrations', function (): void {
+    Schema::create('rollback_log', function (Blueprint $table): void {
+        $table->id();
+        $table->string('name');
+    });
+
+    $contentA = <<<'PHP'
+<?php
+
+use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+
+    public function down(): void
+    {
+        DB::table('rollback_log')->insert(['name' => 'a']);
+    }
+};
+PHP;
+
+    $contentB = <<<'PHP'
+<?php
+
+use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+
+    public function down(): void
+    {
+        DB::table('rollback_log')->insert(['name' => 'b']);
+    }
+};
+PHP;
+
+    $this->createTestMigration('a_first', $contentA);
+    $this->createTestMigration('b_second', $contentB);
+    $this->artisan('data:migrate', ['--force' => true]);
+
+    $this->artisan('data:rollback', ['--step' => 1, '--force' => true]);
+    $this->artisan('data:rollback', ['--batch' => 1, '--force' => true])
+        ->assertSuccessful();
+
+    expect(DB::table('rollback_log')->orderBy('name')->pluck('name')->all())->toBe(['a', 'b']);
+});
+
+it('rollback --batch reports nothing when the batch only contains rolled back records', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+    public function down(): void {}
+};
+PHP;
+
+    $this->createTestMigration('fully_rolled_back', $content);
+    $this->artisan('data:migrate', ['--force' => true]);
+    $this->artisan('data:rollback', ['--force' => true]);
+
+    $this->artisan('data:rollback', ['--batch' => 1, '--force' => true])
+        ->expectsOutputToContain('No migrations found for batch 1')
+        ->assertSuccessful();
 });

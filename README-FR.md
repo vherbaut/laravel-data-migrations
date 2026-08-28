@@ -163,7 +163,7 @@ class FixUserEmailsSeeder extends Seeder
 ## Prérequis
 
 - PHP 8.2 ou supérieur
-- Laravel 10.x, 11.x ou 12.x
+- Laravel 10.x, 11.x, 12.x ou 13.x
 - Une base de données supportée (MySQL, PostgreSQL, SQLite, SQL Server)
 
 ---
@@ -187,6 +187,16 @@ Exécutez les migrations pour créer la table de suivi :
 ```bash
 php artisan migrate
 ```
+
+### Optionnel : Publier la migration de suivi
+
+Le package charge automatiquement la migration de sa table `data_migrations`. Publiez-la uniquement si vous devez la personnaliser :
+
+```bash
+php artisan vendor:publish --tag=data-migrations-migrations
+```
+
+Dès qu'une copie publiée existe dans `database/migrations` (même renommée avec un nouveau timestamp), le package cesse de charger sa propre copie.
 
 ### Optionnel : Publier les stubs
 
@@ -333,8 +343,12 @@ php artisan data:migrate [options]
 |--------|-------------|
 | `--dry-run` | Prévisualiser les migrations sans exécuter |
 | `--force` | Forcer l'exécution en environnement de production |
-| `--step` | Exécuter les migrations une par une |
+| `--step` | Attribuer un numéro de lot distinct à chaque migration afin de pouvoir les annuler une par une |
 | `--no-confirm` | Ignorer les demandes de confirmation du nombre de lignes |
+
+#### Rejouer les migrations échouées ou annulées
+
+Les migrations enregistrées comme `failed` ou `rolled_back` sont considérées comme en attente : le prochain `data:migrate` les ré-exécute et remplace l'enregistrement précédent. `data:rollback` ne cible que les migrations `completed` (ou encore `running`).
 
 ### data:rollback
 
@@ -387,7 +401,6 @@ php artisan data:fresh [options]
 | Option | Description |
 |--------|-------------|
 | `--force` | Forcer l'exécution en environnement de production |
-| `--seed` | Exécuter les seeders après les migrations (réservé) |
 
 > **Attention :** Cette commande supprimera tous les enregistrements de migration et ré-exécutera chaque migration. À utiliser avec précaution.
 
@@ -522,6 +535,8 @@ return new class extends DataMigration
     }
 };
 ```
+
+> **Note :** Les migrations générées ne déclarent pas `down()`. Une migration sans `down()` est ignorée par `data:rollback`. N'ajoutez pas de `down()` vide : la migration serait marquée comme annulée sans qu'aucune donnée ne soit restaurée.
 
 ### Utiliser une connexion de base de données spécifique
 

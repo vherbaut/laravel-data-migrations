@@ -189,3 +189,43 @@ PHP;
         'status' => 'completed',
     ]);
 });
+
+it('assigns a distinct batch number to each migration with --step', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+};
+PHP;
+
+    $this->createTestMigration('step_a', $content);
+    $this->createTestMigration('step_b', $content);
+
+    $this->artisan('data:migrate', ['--step' => true, '--force' => true])
+        ->assertSuccessful();
+
+    expect(DB::table('data_migrations')->orderBy('migration')->pluck('batch')->all())->toBe([1, 2]);
+});
+
+it('assigns the same batch number to every migration without --step', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void {}
+};
+PHP;
+
+    $this->createTestMigration('step_a', $content);
+    $this->createTestMigration('step_b', $content);
+
+    $this->artisan('data:migrate', ['--force' => true])
+        ->assertSuccessful();
+
+    expect(DB::table('data_migrations')->orderBy('migration')->pluck('batch')->all())->toBe([1, 1]);
+});
