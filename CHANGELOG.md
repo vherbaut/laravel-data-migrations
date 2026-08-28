@@ -8,7 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Minimum requirements are PHP 8.2 and Laravel 12; Laravel 13 is supported. The CI matrix covers PHP 8.2 to 8.5 on Laravel 12 and 13 and no longer needs the Composer security advisory exemption that end-of-life releases required
+- PHPStan runs at level 6
+
+### Removed
+
+- Laravel 10 and 11 support
+- The execution timeout: `$timeout` property, `MigrationInterface::getTimeout()`, `timeout` config key and `TimeoutException`. It relied on `set_time_limit()`, which ignores time spent in database queries, so it never bounded a migration. See UPGRADING.md
+
 ## [1.2.0] - 2026-08-28
+
+### Added
 
 - Events `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations`, dispatched by the migrator around `up()` and `down()` (never during a dry run). `Migrator` accepts an optional event dispatcher as fifth constructor argument
 - `--isolated[=CODE]` option on `data:migrate`, `data:rollback` and `data:fresh`, backed by a single cache lock shared by the three commands, with a new `lock` config block (`enabled`, `store`, `ttl`)
@@ -145,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clean separation of concerns
 - Typed DTOs (`MigrationRecord`)
 
-[1.2.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.2...HEAD
+[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/1.2.0...HEAD
+[1.2.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.2...1.2.0
 [1.1.2]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.3...1.1.0

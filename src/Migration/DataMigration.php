@@ -56,13 +56,6 @@ abstract class DataMigration implements MigrationInterface
     protected bool $idempotent = false;
 
     /**
-     * Maximum execution time in seconds (0 = use config default, null = unlimited).
-     *
-     * @var int|null
-     */
-    protected ?int $timeout = 0;
-
-    /**
      * Description of what this migration does.
      *
      * @var string
@@ -413,15 +406,5 @@ abstract class DataMigration implements MigrationInterface
     public function getConnection(): ?string
     {
         return $this->connection;
-    }
-
-    /**
-     * Get the timeout for this migration.
-     *
-     * @return int|null
-     */
-    public function getTimeout(): ?int
-    {
-        return $this->timeout;
     }
 }

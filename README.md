@@ -155,7 +155,6 @@ class FixUserEmailsSeeder extends Seeder
 | **Production Safety** | Built-in confirmations and force flags |
 | **Transaction Support** | Automatic transaction wrapping with configurable modes |
 | **Auto Backup** | Optional automatic backup before migrations (requires [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
-| **Timeout Control** | Configurable execution time limits |
 | **Events** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations` for notifications and audit |
 | **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:fresh` |
 | **Row Threshold Alerts** | Confirmation prompts for large operations |
@@ -168,7 +167,7 @@ class FixUserEmailsSeeder extends Seeder
 ## Requirements
 
 - PHP 8.2 or higher
-- Laravel 10.x, 11.x, 12.x, or 13.x
+- Laravel 12.x or 13.x
 - A supported database (MySQL, PostgreSQL, SQLite, SQL Server)
 
 ---
@@ -451,7 +450,6 @@ The command refuses to run when the migrations directory contains no file at all
 | `$chunkColumn` | `string` | `'id'` | Key column used by `chunk()`, `chunkLazy()` and `chunkUpdate()` to paginate |
 | `$idempotent` | `bool` | `false` | Whether this migration is safe to run multiple times |
 | `$connection` | `?string` | `null` | Database connection to use (null = default) |
-| `$timeout` | `?int` | `0` | Maximum execution time in seconds (0 = use config, null = unlimited) |
 
 ### Basic Migration
 
@@ -581,20 +579,6 @@ return new class extends DataMigration
     public function up(): void
     {
         $this->db()->table('settings')->update(['migrated' => true]);
-    }
-};
-```
-
-### Setting Execution Timeout
-
-```php
-return new class extends DataMigration
-{
-    protected ?int $timeout = 3600; // 1 hour maximum
-
-    public function up(): void
-    {
-        // Long-running operation...
     }
 };
 ```
@@ -771,17 +755,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Timeout
-    |--------------------------------------------------------------------------
-    |
-    | Maximum execution time in seconds. Set to 0 or null for no limit.
-    | Individual migrations can override this with the $timeout property.
-    |
-    */
-    'timeout' => 0,
-
-    /*
-    |--------------------------------------------------------------------------
     | Logging Configuration
     |--------------------------------------------------------------------------
     */
@@ -901,18 +874,6 @@ composer require spatie/laravel-backup
 'safety' => [
     'auto_backup' => true,
 ],
-```
-
-### Timeout Protection
-
-Prevent runaway migrations with timeout limits:
-
-```php
-// config/data-migrations.php
-'timeout' => 300, // 5 minutes global limit
-
-// Or per-migration
-protected ?int $timeout = 600; // 10 minutes for this migration
 ```
 
 ### Concurrency Lock
@@ -1207,8 +1168,7 @@ src/
 │   └── MigrationStatus.php      # Row of data:status, JSON shape
 ├── Exceptions/
 │   ├── MigrationException.php
-│   ├── MigrationNotFoundException.php
-│   └── TimeoutException.php
+│   └── MigrationNotFoundException.php
 ├── Events/
 │   ├── DataMigrationEnded.php
 │   ├── DataMigrationFailed.php

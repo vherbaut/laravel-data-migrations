@@ -4,13 +4,11 @@ includes:
 parameters:
     paths:
         - src
-    level: 5
+    level: 6
     parallel:
         maximumNumberOfProcesses: 1
     ignoreErrors:
         # Test helper trait shipped for consuming applications, so nothing in src/ uses it.
-        # PHPStan 1.x does not report trait.unused, hence reportUnmatched.
         -
             identifier: trait.unused
             path: src/Testing/InteractsWithDataMigrations.php
-            reportUnmatched: false

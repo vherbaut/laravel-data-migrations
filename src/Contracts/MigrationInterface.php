@@ -102,11 +102,4 @@ interface MigrationInterface
      * @return string|null
      */
     public function getConnection(): ?string;
-
-    /**
-     * Get the timeout for this migration.
-     *
-     * @return int|null
-     */
-    public function getTimeout(): ?int;
 }

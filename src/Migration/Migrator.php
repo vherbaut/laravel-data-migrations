@@ -209,7 +209,6 @@ class Migrator implements MigratorInterface
      */
     protected function runMigrationUp(MigrationInterface $migration, string $name, array $options): void
     {
-        $this->applyTimeout($migration);
         $this->runAutoBackup($migration, $name);
 
         $useTransaction = $this->shouldUseTransaction($migration);
@@ -223,30 +222,6 @@ class Migrator implements MigratorInterface
         } else {
             $migration->up();
         }
-    }
-
-    /**
-     * Apply timeout limit for the migration.
-     *
-     * @param MigrationInterface $migration
-     * @return void
-     */
-    protected function applyTimeout(MigrationInterface $migration): void
-    {
-        $timeout = $migration->getTimeout();
-
-        // If migration timeout is 0, use config default
-        if ($timeout === 0) {
-            /** @var int $timeout */
-            $timeout = config('data-migrations.timeout', 0);
-        }
-
-        // If timeout is null or 0, no limit
-        if ($timeout === null || $timeout === 0) {
-            return;
-        }
-
-        set_time_limit($timeout);
     }
 
     /**

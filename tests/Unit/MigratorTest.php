@@ -48,10 +48,6 @@ beforeEach(function (): void {
     );
 });
 
-afterEach(function (): void {
-    set_time_limit(0);
-});
-
 it('rolls back the migration changes when a migration throws inside a transaction in auto mode', function (): void {
     $this->createTestMigration('failing_in_transaction', dataMigrationContent(
         "DB::table('widgets')->insert(['name' => 'one']); throw new RuntimeException('boom');",
@@ -96,34 +92,6 @@ it('never wraps the migration in a transaction in never mode', function (): void
 
     expect(fn () => $this->migrator->run())->toThrow(RuntimeException::class)
         ->and(DB::table('widgets')->count())->toBe(1);
-});
-
-it('applies the migration timeout with set_time_limit', function (): void {
-    $this->createTestMigration('with_timeout', dataMigrationContent('', 'protected ?int $timeout = 300;'));
-
-    $this->migrator->run();
-
-    expect(ini_get('max_execution_time'))->toBe('300');
-});
-
-it('applies the config timeout when the migration timeout is zero', function (): void {
-    config()->set('data-migrations.timeout', 250);
-
-    $this->createTestMigration('with_config_timeout', dataMigrationContent('', 'protected ?int $timeout = 0;'));
-
-    $this->migrator->run();
-
-    expect(ini_get('max_execution_time'))->toBe('250');
-});
-
-it('leaves the time limit untouched when the migration timeout is null', function (): void {
-    set_time_limit(400);
-
-    $this->createTestMigration('without_timeout', dataMigrationContent('', 'protected ?int $timeout = null;'));
-
-    $this->migrator->run();
-
-    expect(ini_get('max_execution_time'))->toBe('400');
 });
 
 it('backs up the affected tables before running when auto backup is enabled', function (): void {
