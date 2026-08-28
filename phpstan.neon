@@ -1,6 +1,5 @@
 includes:
     - vendor/larastan/larastan/extension.neon
-    - phpstan-baseline.neon
 
 parameters:
     paths:
@@ -8,3 +7,10 @@ parameters:
     level: 5
     parallel:
         maximumNumberOfProcesses: 1
+    ignoreErrors:
+        # Test helper trait shipped for consuming applications, so nothing in src/ uses it.
+        # PHPStan 1.x does not report trait.unused, hence reportUnmatched.
+        -
+            identifier: trait.unused
+            path: src/Testing/InteractsWithDataMigrations.php
+            reportUnmatched: false

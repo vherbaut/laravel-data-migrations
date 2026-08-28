@@ -29,6 +29,13 @@ class MigrationFileResolver implements MigrationFileResolverInterface
     protected string $path;
 
     /**
+     * Directories overriding the configured path, empty when none was given.
+     *
+     * @var array<int, string>
+     */
+    protected array $paths = [];
+
+    /**
      * Create a new migration file resolver instance.
      *
      * @param Filesystem $files
@@ -41,21 +48,48 @@ class MigrationFileResolver implements MigrationFileResolverInterface
     }
 
     /**
-     * Get all migration files from the configured path.
+     * Get all migration files from the current paths, sorted by file name.
      *
      * @return array<int, string>
      */
     public function getMigrationFiles(): array
     {
-        if (! is_dir($this->path)) {
-            return [];
+        $files = [];
+
+        foreach ($this->getPaths() as $path) {
+            if (! is_dir($path)) {
+                continue;
+            }
+
+            $files = array_merge($files, $this->files->glob($path.'/*_*.php'));
         }
 
-        $files = $this->files->glob($this->path.'/*_*.php');
-
-        sort($files);
+        usort($files, fn (string $left, string $right): int => strcmp(basename($left), basename($right)));
 
         return $files;
+    }
+
+    /**
+     * Replace the directories to scan. An empty list restores the configured path.
+     *
+     * @param array<int, string> $paths
+     * @return static
+     */
+    public function setPaths(array $paths): static
+    {
+        $this->paths = array_values($paths);
+
+        return $this;
+    }
+
+    /**
+     * Get the directories currently scanned.
+     *
+     * @return array<int, string>
+     */
+    public function getPaths(): array
+    {
+        return $this->paths === [] ? [$this->path] : $this->paths;
     }
 
     /**

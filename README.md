@@ -24,6 +24,7 @@
 - [Writing Data Migrations](#writing-data-migrations)
 - [Configuration](#configuration)
 - [Safety Features](#safety-features)
+- [Events](#events)
 - [Real-World Examples](#real-world-examples)
 - [Architecture](#architecture)
 - [Testing](#testing)
@@ -155,8 +156,12 @@ class FixUserEmailsSeeder extends Seeder
 | **Transaction Support** | Automatic transaction wrapping with configurable modes |
 | **Auto Backup** | Optional automatic backup before migrations (requires [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
 | **Timeout Control** | Configurable execution time limits |
+| **Events** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations` for notifications and audit |
+| **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:fresh` |
 | **Row Threshold Alerts** | Confirmation prompts for large operations |
 | **PHPStan Level 5** | Fully typed, strict static analysis compliance |
+| **Test Helpers** | `InteractsWithDataMigrations` trait and `DataMigrations::fake()` for your test suite |
+| **Chained Runs** | Optional `run_after_migrate` hook running `data:migrate` after `php artisan migrate` |
 
 ---
 
@@ -303,6 +308,7 @@ Total: 2 | Pending: 1 | Completed: 1 | Failed: 0
 | `data:rollback` | Rollback the last batch of migrations |
 | `data:status` | Display the status of all migrations |
 | `data:fresh` | Reset and re-run all data migrations |
+| `data:prune` | Remove tracking records whose migration file no longer exists |
 
 ### make:data-migration
 
@@ -317,6 +323,8 @@ php artisan make:data-migration {name} [options]
 | `--table=` | Specify the table being migrated |
 | `--chunked` | Use the chunked migration template |
 | `--idempotent` | Mark the migration as idempotent |
+| `--path=` | Directory where the file is created, relative to the base path unless `--realpath` |
+| `--realpath` | Treat `--path` as an absolute path |
 
 **Examples:**
 
@@ -345,6 +353,9 @@ php artisan data:migrate [options]
 | `--force` | Force execution in production environment |
 | `--step` | Assign a separate batch number to each migration so they can be rolled back individually |
 | `--no-confirm` | Skip row count confirmation prompts |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
+| `--path=*` | Only use the data migrations found in these directories (repeatable, relative to the base path unless `--realpath`) |
+| `--realpath` | Treat `--path` values as absolute paths |
 
 #### Retrying failed or rolled back migrations
 
@@ -363,6 +374,9 @@ php artisan data:rollback [options]
 | `--step=N` | Rollback the last N migrations |
 | `--batch=N` | Rollback a specific batch number |
 | `--force` | Force execution in production environment |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
+| `--path=*` | Only use the data migrations found in these directories (repeatable, relative to the base path unless `--realpath`) |
+| `--realpath` | Treat `--path` values as absolute paths |
 
 **Examples:**
 
@@ -389,6 +403,9 @@ php artisan data:status [options]
 |--------|-------------|
 | `--pending` | Only show pending migrations |
 | `--ran` | Only show completed migrations |
+| `--json` | Print the list as a JSON array (one object per migration with `name`, `status`, `batch`, `rows_affected`, `duration_ms`, `ran_at`, `orphaned`) |
+
+Records whose migration file has been deleted are listed too, flagged `(orphaned)` in the table and counted in the summary line. Remove them with `data:prune`.
 
 ### data:fresh
 
@@ -401,8 +418,23 @@ php artisan data:fresh [options]
 | Option | Description |
 |--------|-------------|
 | `--force` | Force execution in production environment |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 
 > **Warning:** This command will delete all migration records and re-run every migration. Use with caution.
+
+### data:prune
+
+Delete the tracking records whose migration file no longer exists (the ones `data:status` flags as orphaned).
+
+```bash
+php artisan data:prune [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Force execution in production environment |
+
+The command refuses to run when the migrations directory contains no file at all while records exist, so a misconfigured `path` cannot wipe the table.
 
 ---
 
@@ -416,6 +448,7 @@ php artisan data:fresh [options]
 | `$affectedTables` | `array` | `[]` | List of tables this migration modifies (for documentation/backup) |
 | `$withinTransaction` | `bool` | `true` | Whether to wrap the migration in a database transaction |
 | `$chunkSize` | `int` | `1000` | Default chunk size for chunked operations |
+| `$chunkColumn` | `string` | `'id'` | Key column used by `chunk()`, `chunkLazy()` and `chunkUpdate()` to paginate |
 | `$idempotent` | `bool` | `false` | Whether this migration is safe to run multiple times |
 | `$connection` | `?string` | `null` | Database connection to use (null = default) |
 | `$timeout` | `?int` | `0` | Maximum execution time in seconds (0 = use config, null = unlimited) |
@@ -602,13 +635,13 @@ $percentage = $this->getProgressPercentage();
 ### Chunk Processing
 
 ```php
-// Process records one at a time
+// Process records one at a time, paginated by key (chunkById under the hood)
 $processed = $this->chunk('table_name', function ($record) {
     // Process each record
     // Progress is automatically incremented
 });
 
-// Memory-efficient lazy iteration
+// Memory-efficient lazy iteration (lazyById under the hood)
 $processed = $this->chunkLazy('table_name', function ($record) {
     // Process each record
 });
@@ -621,7 +654,12 @@ $affected = $this->chunkUpdate(
         $query->where('status', 'pending');
     }
 );
+
+// Optional chunk size and key column (defaults: $chunkSize and $chunkColumn)
+$processed = $this->chunk('legacy_table', fn ($record) => $this->process($record), 500, 'legacy_id');
 ```
+
+All three helpers walk the table by key, so the key column must be unique and the callback must not change it. `chunkUpdate()` selects the keys of the next matching rows, then updates that key range: every row is visited once and the loop ends even when the update leaves the rows matching the predicate. Wrap `OR` conditions in a closure inside the callback, as with `chunkById()`.
 
 ### Row Counting
 
@@ -775,8 +813,48 @@ return [
         */
         'auto_backup' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Concurrency Lock
+    |--------------------------------------------------------------------------
+    */
+    'lock' => [
+        /*
+        | Take the shared lock even when --isolated is not passed.
+        */
+        'enabled' => false,
+
+        /*
+        | Cache store holding the lock (null = default store).
+        */
+        'store' => null,
+
+        /*
+        | Seconds after which a lock left behind by a killed process expires.
+        */
+        'ttl' => 3600,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Run After Schema Migrations
+    |--------------------------------------------------------------------------
+    */
+    'run_after_migrate' => false,
 ];
 ```
+
+### Running Data Migrations After Schema Migrations
+
+Set `run_after_migrate` to `true` to have `data:migrate --force` run automatically once `php artisan migrate`, `migrate:fresh` or `migrate:refresh` completes successfully, so a deployment needs a single command:
+
+```php
+// config/data-migrations.php
+'run_after_migrate' => true,
+```
+
+The hook listens to Laravel's `CommandFinished` console event. It is skipped after `--pretend`, after a failed command, and in the `testing` environment, where Laravel does not dispatch console events (a `RefreshDatabase` test suite will not run your data migrations).
 
 ---
 
@@ -836,6 +914,58 @@ Prevent runaway migrations with timeout limits:
 // Or per-migration
 protected ?int $timeout = 600; // 10 minutes for this migration
 ```
+
+### Concurrency Lock
+
+Two `data:migrate` processes started at the same time would both try to insert the same tracking record. Pass `--isolated` to `data:migrate`, `data:rollback` or `data:fresh` to take a cache lock first, exactly like `php artisan migrate --isolated`:
+
+```bash
+# Skips the run (exit code 0) when another data migration command holds the lock
+php artisan data:migrate --isolated
+
+# Same, but exits with code 12 instead of 0 when the lock is held
+php artisan data:migrate --isolated=12
+```
+
+The three commands share one lock named `data-migrations`, so `data:rollback --isolated` also waits for a running `data:migrate --isolated`. `data:fresh --isolated` keeps the lock while it runs `data:migrate` internally. The lock lives in the cache store given by `lock.store` (the default store when `null`) and expires after `lock.ttl` seconds if the process is killed. Set `lock.enabled` to `true` to take the lock without passing the option:
+
+```php
+// config/data-migrations.php
+'lock' => [
+    'enabled' => true,
+    'store' => 'redis',
+    'ttl' => 7200,
+],
+```
+
+---
+
+## Events
+
+The migrator dispatches Laravel events you can listen to for notifications, metrics or audit logs. Each event carries the migration instance, its name and the method being run (`$method`, either `up` or `down`), mirroring Laravel's own `MigrationStarted` and `MigrationEnded` events:
+
+| Event | Properties | When |
+|-------|------------|------|
+| `DataMigrationStarted` | `migration`, `name`, `method` | Right before `up()` or `down()` runs |
+| `DataMigrationEnded` | `migration`, `name`, `method`, `rowsAffected`, `durationMs` | After the tracking record was updated |
+| `DataMigrationFailed` | `migration`, `name`, `method`, `exception` | Before the exception is rethrown |
+| `NoPendingDataMigrations` | `method` | When a run or a rollback finds nothing to do |
+
+```php
+use Vherbaut\DataMigrations\Events\DataMigrationEnded;
+use Vherbaut\DataMigrations\Events\DataMigrationFailed;
+
+Event::listen(DataMigrationEnded::class, function (DataMigrationEnded $event) {
+    Log::info("Data migration {$event->name} ({$event->method}) affected {$event->rowsAffected} rows in {$event->durationMs}ms");
+});
+
+Event::listen(DataMigrationFailed::class, function (DataMigrationFailed $event) {
+    Notification::route('slack', config('services.slack.ops'))
+        ->notify(new DataMigrationFailedNotification($event->name, $event->exception));
+});
+```
+
+No event is dispatched during a dry run. The migrator receives the dispatcher when it is first resolved, so in tests call `Event::fake()` before the first Artisan call, or register a real listener with `Event::listen()`.
 
 ---
 
@@ -1061,8 +1191,11 @@ This package follows SOLID principles and uses clean architecture:
 ```
 src/
 ├── Commands/                    # Artisan commands
+│   ├── Concerns/
+│   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigrateFreshCommand.php
+│   ├── DataMigratePruneCommand.php
 │   ├── DataMigrateRollbackCommand.php
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
@@ -1070,21 +1203,35 @@ src/
 │   └── TracksProgress.php       # Progress bar trait
 ├── Contracts/                   # Interfaces
 ├── DTO/
-│   └── MigrationRecord.php      # Typed data transfer object
+│   ├── MigrationRecord.php      # Typed data transfer object
+│   └── MigrationStatus.php      # Row of data:status, JSON shape
 ├── Exceptions/
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php
 │   └── TimeoutException.php
+├── Events/
+│   ├── DataMigrationEnded.php
+│   ├── DataMigrationFailed.php
+│   ├── DataMigrationStarted.php
+│   └── NoPendingDataMigrations.php
 ├── Facades/
 │   └── DataMigrations.php
+├── Listeners/
+│   └── RunDataMigrationsAfterMigrate.php
+├── Locking/
+│   └── DataMigrationsCommandMutex.php
 ├── Migration/
 │   ├── DataMigration.php        # Base migration class
 │   ├── MigrationFileResolver.php
 │   ├── MigrationRepository.php
-│   └── Migrator.php
+│   ├── Migrator.php
+│   └── RollbackTargetSelector.php
 ├── Services/
 │   ├── NullBackupService.php
 │   └── SpatieBackupService.php
+├── Testing/
+│   ├── InteractsWithDataMigrations.php
+│   └── MigratorFake.php
 └── DataMigrationsServiceProvider.php
 ```
 
@@ -1104,6 +1251,12 @@ $rolledBack = DataMigrations::rollback(['step' => 1]);
 
 // Get repository
 $repo = DataMigrations::getRepository();
+
+// Records whose migration file no longer exists
+$orphaned = DataMigrations::getOrphanedMigrations();
+
+// In tests: record what would run without executing anything (see Testing)
+$fake = DataMigrations::fake();
 ```
 
 ---
@@ -1124,34 +1277,59 @@ composer phpstan
 
 ### Testing Your Migrations
 
+The `InteractsWithDataMigrations` trait runs one data migration for real, in a batch of its own, and asserts its tracking status. It needs the tracking table, so use it with `RefreshDatabase`:
+
 ```php
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Vherbaut\DataMigrations\Testing\InteractsWithDataMigrations;
 
-class DataMigrationTest extends TestCase
+class SplitUserNamesTest extends TestCase
 {
+    use InteractsWithDataMigrations;
     use RefreshDatabase;
 
     public function test_it_splits_user_names(): void
     {
-        // Arrange
-        DB::table('users')->insert([
-            'full_name' => 'John Doe',
-            'first_name' => null,
-            'last_name' => null,
-        ]);
+        DB::table('users')->insert(['full_name' => 'John Doe']);
 
-        // Act
-        $this->artisan('data:migrate', ['--force' => true])
-            ->assertSuccessful();
+        $this->runDataMigration('2024_06_01_120000_split_user_names');
 
-        // Assert
-        $this->assertDatabaseHas('users', [
-            'first_name' => 'John',
-            'last_name' => 'Doe',
-        ]);
+        $this->assertDataMigrationRan('2024_06_01_120000_split_user_names');
+        $this->assertDatabaseHas('users', ['first_name' => 'John', 'last_name' => 'Doe']);
+
+        $this->rollbackDataMigration('2024_06_01_120000_split_user_names');
+
+        $this->assertDataMigrationRolledBack('2024_06_01_120000_split_user_names');
     }
 }
 ```
+
+| Helper | Behaviour |
+|--------|-----------|
+| `runDataMigration($name)` | Runs the migration in its own batch. Throws `MigrationNotFoundException` when the file is missing and `LogicException` when it already ran |
+| `runDataMigrations()` | Runs every pending migration, like `data:migrate` |
+| `rollbackDataMigration($name)` | Rolls the migration back. Throws `LogicException` when it shares its batch with other migrations |
+| `assertDataMigrationRan($name)`, `assertDataMigrationNotRan($name)`, `assertDataMigrationFailed($name)`, `assertDataMigrationRolledBack($name)` | Assert the tracking status |
+
+### Faking the Migrator
+
+To test code that triggers data migrations (a deployment command, a listener) without executing them, swap the migrator with a fake, like `Bus::fake()`. Runs and rollbacks are recorded, reads still hit the real repository:
+
+```php
+use Vherbaut\DataMigrations\Facades\DataMigrations;
+
+public function test_deploy_command_runs_data_migrations(): void
+{
+    $fake = DataMigrations::fake();
+
+    $this->artisan('app:deploy');
+
+    $fake->assertRan('2024_06_01_120000_split_user_names');
+    $fake->assertNothingRolledBack();
+}
+```
+
+Available assertions: `assertRan($name)`, `assertNotRan($name)`, `assertNothingRan()`, `assertRolledBack($name)`, `assertNothingRolledBack()`, plus `ran()` and `rolledBack()` to inspect the recorded names. `fake()` also resets the Artisan console application, so commands resolved before the call pick up the fake.
 
 ---
 

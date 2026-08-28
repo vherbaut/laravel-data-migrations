@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
+use Vherbaut\DataMigrations\DTO\MigrationStatus;
 
 /**
  * Command to display data migration status.
@@ -21,7 +22,8 @@ class DataMigrateStatusCommand extends Command
      */
     protected $signature = 'data:status
                             {--pending : Only show pending migrations}
-                            {--ran : Only show ran migrations}';
+                            {--ran : Only show ran migrations}
+                            {--json : Output the status list as JSON}';
 
     /**
      * The console command description.
@@ -69,6 +71,12 @@ class DataMigrateStatusCommand extends Command
         $migrations = $this->buildMigrationStatusList($files, $ran);
         $migrations = $this->applyFilters($migrations);
 
+        if ($this->option('json')) {
+            $this->displayJson($migrations);
+
+            return self::SUCCESS;
+        }
+
         if ($migrations->isEmpty()) {
             $this->info('No migrations found.');
 
@@ -82,107 +90,120 @@ class DataMigrateStatusCommand extends Command
     }
 
     /**
-     * Build the migration status list.
+     * Build the migration status list: every file, then every record whose file is gone.
      *
      * @param array<int, string> $files
      * @param Collection<int, MigrationRecord> $ran
-     * @return Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}>
+     * @return Collection<int, MigrationStatus>
      */
     protected function buildMigrationStatusList(array $files, Collection $ran): Collection
     {
-        return Collection::make($files)->map(function (string $file) use ($ran): array {
+        $tracked = Collection::make($files)->map(function (string $file) use ($ran): MigrationStatus {
             $name = $this->migrator->getMigrationName($file);
-            $record = $ran->first(fn (MigrationRecord $r): bool => $r->migration === $name);
+            $record = $ran->first(fn (MigrationRecord $record): bool => $record->migration === $name);
 
-            return [
-                'name' => $name,
-                'batch' => $record?->batch,
-                'status' => $record !== null ? $record->status : 'pending',
-                'rows' => $record?->rowsAffected,
-                'duration' => $record?->durationMs,
-                'ran_at' => $record?->completedAt?->format('Y-m-d H:i:s'),
-            ];
+            return $record === null
+                ? MigrationStatus::pending($name)
+                : MigrationStatus::fromRecord($record, false);
         });
+
+        $orphaned = $this->migrator->getOrphanedMigrations()
+            ->map(fn (MigrationRecord $record): MigrationStatus => MigrationStatus::fromRecord($record, true));
+
+        return $tracked->concat($orphaned)->values();
     }
 
     /**
      * Apply filters based on command options.
      *
-     * @param Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}> $migrations
-     * @return Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}>
+     * @param Collection<int, MigrationStatus> $migrations
+     * @return Collection<int, MigrationStatus>
      */
     protected function applyFilters(Collection $migrations): Collection
     {
         if ($this->option('pending')) {
-            /** @var Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}> */
-            return $migrations->filter(
-                fn (array $m): bool => $m['status'] === 'pending'
-            )->values();
+            return $migrations->filter(fn (MigrationStatus $migration): bool => $migration->isPending())->values();
         }
 
         if ($this->option('ran')) {
-            /** @var Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}> */
-            return $migrations->filter(
-                fn (array $m): bool => $m['status'] !== 'pending'
-            )->values();
+            return $migrations->filter(fn (MigrationStatus $migration): bool => ! $migration->isPending())->values();
         }
 
         return $migrations;
     }
 
     /**
+     * Display the migrations as a JSON array.
+     *
+     * @param Collection<int, MigrationStatus> $migrations
+     * @return void
+     */
+    protected function displayJson(Collection $migrations): void
+    {
+        $this->line(json_encode(
+            $migrations->map(fn (MigrationStatus $migration): array => $migration->toArray())->all(),
+            JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR,
+        ));
+    }
+
+    /**
      * Display the migrations table.
      *
-     * @param Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}> $migrations
+     * @param Collection<int, MigrationStatus> $migrations
      * @return void
      */
     protected function displayTable(Collection $migrations): void
     {
         $this->table(
             ['Migration', 'Batch', 'Status', 'Rows', 'Duration', 'Ran At'],
-            $migrations->map(fn (array $m): array => [
-                $m['name'],
-                $m['batch'] !== null ? (string) $m['batch'] : '-',
-                $this->formatStatus($m['status']),
-                $m['rows'] !== null ? number_format($m['rows']) : '-',
-                $m['duration'] !== null ? $m['duration'].'ms' : '-',
-                $m['ran_at'] ?? '-',
-            ])->toArray()
+            $migrations->map(fn (MigrationStatus $migration): array => [
+                $migration->name,
+                $migration->batch !== null ? (string) $migration->batch : '-',
+                $this->formatStatus($migration),
+                $migration->rowsAffected !== null ? number_format($migration->rowsAffected) : '-',
+                $migration->durationMs !== null ? "{$migration->durationMs}ms" : '-',
+                $migration->ranAt?->format('Y-m-d H:i:s') ?? '-',
+            ])->all()
         );
     }
 
     /**
      * Display the summary.
      *
-     * @param Collection<int, array{name: string, batch: int|null, status: string, rows: int|null, duration: int|null, ran_at: string|null}> $migrations
+     * @param Collection<int, MigrationStatus> $migrations
      * @return void
      */
     protected function displaySummary(Collection $migrations): void
     {
         $this->newLine();
 
-        $pending = $migrations->filter(fn (array $m): bool => $m['status'] === 'pending')->count();
-        $completed = $migrations->filter(fn (array $m): bool => $m['status'] === 'completed')->count();
-        $failed = $migrations->filter(fn (array $m): bool => $m['status'] === 'failed')->count();
+        $pending = $migrations->filter(fn (MigrationStatus $migration): bool => $migration->isPending())->count();
+        $completed = $migrations->filter(fn (MigrationStatus $migration): bool => $migration->status === 'completed')->count();
+        $failed = $migrations->filter(fn (MigrationStatus $migration): bool => $migration->status === 'failed')->count();
+        $orphaned = $migrations->filter(fn (MigrationStatus $migration): bool => $migration->orphaned)->count();
 
-        $this->info("Total: {$migrations->count()} | Pending: {$pending} | Completed: {$completed} | Failed: {$failed}");
+        $this->info("Total: {$migrations->count()} | Pending: {$pending} | Completed: {$completed} | Failed: {$failed} | Orphaned: {$orphaned}");
     }
 
     /**
-     * Format the status for display.
+     * Format the status for display, flagging records whose file is gone.
      *
-     * @param string $status
+     * @param MigrationStatus $migration
      * @return string
      */
-    protected function formatStatus(string $status): string
+    protected function formatStatus(MigrationStatus $migration): string
     {
-        return match ($status) {
+        $label = match ($migration->status) {
             'pending' => '<fg=yellow>Pending</>',
             'running' => '<fg=blue>Running</>',
             'completed' => '<fg=green>Completed</>',
             'failed' => '<fg=red>Failed</>',
             'rolled_back' => '<fg=gray>Rolled Back</>',
-            default => $status,
+            default => $migration->status,
         };
+
+        return $migration->orphaned
+            ? "{$label} <fg=yellow>(orphaned)</>"
+            : $label;
     }
 }

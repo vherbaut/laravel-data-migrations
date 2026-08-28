@@ -5,10 +5,15 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Facades;
 
 use Illuminate\Console\OutputStyle;
+use Illuminate\Contracts\Console\Kernel as KernelContract;
+use Illuminate\Foundation\Console\Kernel;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Facade;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\DTO\MigrationRecord;
+use Vherbaut\DataMigrations\Testing\MigratorFake;
 
 /**
  * Facade for the data migrations service.
@@ -17,6 +22,7 @@ use Vherbaut\DataMigrations\Contracts\MigratorInterface;
  * @method static void runMigration(string $file, int $batch, array<string, mixed> $options = []) Run a single migration
  * @method static array<int, string> rollback(array<string, mixed> $options = []) Rollback the last batch
  * @method static array<int, string> getPendingMigrations() Get pending migrations
+ * @method static Collection<int, MigrationRecord> getOrphanedMigrations() Get the records whose file no longer exists
  * @method static array<int, string> getMigrationFiles() Get all migration files
  * @method static MigrationInterface resolve(string $file) Resolve a migration instance
  * @method static string getMigrationName(string $file) Get migration name from file path
@@ -36,5 +42,45 @@ class DataMigrations extends Facade
     protected static function getFacadeAccessor(): string
     {
         return MigratorInterface::class;
+    }
+
+    /**
+     * Replace the migrator with a fake that records runs and rollbacks without executing them.
+     *
+     * @return MigratorFake
+     */
+    public static function fake(): MigratorFake
+    {
+        /** @var MigratorInterface $migrator */
+        $migrator = static::getFacadeRoot();
+        $fake = new MigratorFake($migrator);
+
+        static::swap($fake);
+        static::forgetArtisanCommands();
+
+        return $fake;
+    }
+
+    /**
+     * Drop the console commands already built with the real migrator, so the next Artisan call resolves the fake.
+     *
+     * @return void
+     */
+    protected static function forgetArtisanCommands(): void
+    {
+        if (! isset(static::$app)) {
+            return;
+        }
+
+        if (! static::$app->resolved(KernelContract::class)) {
+            return;
+        }
+
+        /** @var KernelContract $kernel */
+        $kernel = static::$app->make(KernelContract::class);
+
+        if ($kernel instanceof Kernel) {
+            $kernel->setArtisan(null);
+        }
     }
 }

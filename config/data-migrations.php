@@ -92,4 +92,35 @@ return [
         // Automatically backup affected tables (requires spatie/laravel-backup)
         'auto_backup' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Concurrency Lock
+    |--------------------------------------------------------------------------
+    |
+    | data:migrate, data:rollback and data:fresh share a single cache lock
+    | when run with --isolated. Set "enabled" to true to take the lock even
+    | without the option. "store" names the cache store holding the lock
+    | (null uses the default store) and "ttl" is the number of seconds after
+    | which a lock left behind by a killed process expires.
+    |
+    */
+    'lock' => [
+        'enabled' => false,
+        'store' => null,
+        'ttl' => 3600,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Run After Schema Migrations
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, "data:migrate --force" runs automatically once "migrate",
+    | "migrate:fresh" or "migrate:refresh" completes successfully (not with
+    | --pretend). This also applies when those commands are run through
+    | Artisan::call(), for example by RefreshDatabase in tests.
+    |
+    */
+    'run_after_migrate' => false,
 ];

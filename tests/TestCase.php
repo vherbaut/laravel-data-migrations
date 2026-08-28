@@ -44,6 +44,8 @@ abstract class TestCase extends BaseTestCase
             'prefix' => '',
         ]);
 
+        $app['config']->set('cache.default', 'array');
+
         $app['config']->set('data-migrations.path', $this->getTestMigrationPath());
         $app['config']->set('data-migrations.table', 'data_migrations');
     }

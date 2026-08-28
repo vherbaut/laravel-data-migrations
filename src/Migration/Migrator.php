@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Migration;
 
 use Illuminate\Console\OutputStyle;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Support\Collection;
 use Throwable;
@@ -14,6 +15,10 @@ use Vherbaut\DataMigrations\Contracts\MigrationInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
+use Vherbaut\DataMigrations\Events\DataMigrationEnded;
+use Vherbaut\DataMigrations\Events\DataMigrationFailed;
+use Vherbaut\DataMigrations\Events\DataMigrationStarted;
+use Vherbaut\DataMigrations\Events\NoPendingDataMigrations;
 
 /**
  * Orchestrates data migration execution.
@@ -49,6 +54,20 @@ class Migrator implements MigratorInterface
     protected BackupServiceInterface $backupService;
 
     /**
+     * The event dispatcher, when events are wanted.
+     *
+     * @var Dispatcher|null
+     */
+    protected ?Dispatcher $events = null;
+
+    /**
+     * Selects the records a rollback targets.
+     *
+     * @var RollbackTargetSelector
+     */
+    protected RollbackTargetSelector $rollbackTargets;
+
+    /**
      * The console output instance.
      *
      * @var OutputStyle|null
@@ -69,17 +88,21 @@ class Migrator implements MigratorInterface
      * @param ConnectionResolverInterface $resolver
      * @param MigrationFileResolverInterface $fileResolver
      * @param BackupServiceInterface $backupService
+     * @param Dispatcher|null $events
      */
     public function __construct(
         MigrationRepositoryInterface $repository,
         ConnectionResolverInterface $resolver,
         MigrationFileResolverInterface $fileResolver,
-        BackupServiceInterface $backupService
+        BackupServiceInterface $backupService,
+        ?Dispatcher $events = null
     ) {
         $this->repository = $repository;
         $this->resolver = $resolver;
         $this->fileResolver = $fileResolver;
         $this->backupService = $backupService;
+        $this->events = $events;
+        $this->rollbackTargets = new RollbackTargetSelector($repository);
     }
 
     /**
@@ -96,6 +119,7 @@ class Migrator implements MigratorInterface
 
         if (count($migrations) === 0) {
             $this->note('<info>Nothing to migrate.</info>');
+            $this->fireEvent(new NoPendingDataMigrations('up'));
 
             return [];
         }
@@ -148,6 +172,7 @@ class Migrator implements MigratorInterface
         $this->note("<comment>Migrating:</comment> {$name}");
 
         $this->repository->logStart($name, $batch);
+        $this->fireEvent(new DataMigrationStarted($migration, $name, 'up'));
         $startTime = microtime(true);
 
         try {
@@ -163,9 +188,11 @@ class Migrator implements MigratorInterface
             );
 
             $this->note("<info>Migrated:</info> {$name} ({$durationMs}ms, {$migration->getRowsAffected()} rows)");
+            $this->fireEvent(new DataMigrationEnded($migration, $name, 'up', $migration->getRowsAffected(), $durationMs));
         } catch (Throwable $e) {
             $this->repository->logFailed($name, $e->getMessage());
             $this->note("<error>Failed:</error> {$name} - {$e->getMessage()}");
+            $this->fireEvent(new DataMigrationFailed($migration, $name, 'up', $e));
 
             throw $e;
         }
@@ -289,20 +316,11 @@ class Migrator implements MigratorInterface
     public function rollback(array $options = []): array
     {
         $this->notes = [];
-        $steps = (int) ($options['step'] ?? 0);
-        $batch = isset($options['batch']) ? (int) $options['batch'] : null;
-
-        // Determine which migrations to rollback
-        if ($batch !== null) {
-            $migrations = $this->repository->getRollbackableByBatch($batch);
-        } elseif ($steps > 0) {
-            $migrations = $this->repository->getRollbackable($steps);
-        } else {
-            $migrations = $this->repository->getLast();
-        }
+        $migrations = $this->rollbackTargets->select($options);
 
         if ($migrations->isEmpty()) {
             $this->note('<info>Nothing to rollback.</info>');
+            $this->fireEvent(new NoPendingDataMigrations('down'));
 
             return [];
         }
@@ -363,6 +381,7 @@ class Migrator implements MigratorInterface
         }
 
         $this->note("<comment>Rolling back:</comment> {$migration->migration}");
+        $this->fireEvent(new DataMigrationStarted($instance, $migration->migration, 'down'));
 
         $startTime = microtime(true);
 
@@ -383,10 +402,12 @@ class Migrator implements MigratorInterface
 
             $durationMs = (int) ((microtime(true) - $startTime) * 1000);
             $this->note("<info>Rolled back:</info> {$migration->migration} ({$durationMs}ms)");
+            $this->fireEvent(new DataMigrationEnded($instance, $migration->migration, 'down', $instance->getRowsAffected(), $durationMs));
 
             return true;
         } catch (Throwable $e) {
             $this->note("<error>Rollback failed:</error> {$migration->migration} - {$e->getMessage()}");
+            $this->fireEvent(new DataMigrationFailed($instance, $migration->migration, 'down', $e));
 
             throw $e;
         }
@@ -406,6 +427,23 @@ class Migrator implements MigratorInterface
             ->reject(fn (string $file): bool => in_array($this->getMigrationName($file), $ran, true))
             ->values()
             ->all();
+    }
+
+    /**
+     * Get the tracking records whose migration file no longer exists.
+     *
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getOrphanedMigrations(): Collection
+    {
+        $names = array_map(
+            fn (string $file): string => $this->getMigrationName($file),
+            $this->getMigrationFiles(),
+        );
+
+        return $this->repository->getMigrations()
+            ->reject(fn (MigrationRecord $record): bool => in_array($record->migration, $names, true))
+            ->values();
     }
 
     /**
@@ -467,6 +505,17 @@ class Migrator implements MigratorInterface
             'never' => false,
             default => $migration->shouldRunInTransaction(),
         };
+    }
+
+    /**
+     * Dispatch an event when a dispatcher was provided.
+     *
+     * @param object $event
+     * @return void
+     */
+    protected function fireEvent(object $event): void
+    {
+        $this->events?->dispatch($event);
     }
 
     /**

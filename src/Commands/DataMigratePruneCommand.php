@@ -5,26 +5,19 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Console\ConfirmableTrait;
-use Illuminate\Contracts\Console\Isolatable;
-use Illuminate\Support\Facades\DB;
-use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 
 /**
- * Command to reset and re-run all data migrations.
+ * Command to delete tracking records whose migration file no longer exists.
  */
-class DataMigrateFreshCommand extends Command implements Isolatable
+class DataMigratePruneCommand extends Command
 {
-    use ConfirmableTrait;
-    use IsolatesDataMigrations;
-
     /**
      * The name and signature of the console command.
      *
      * @var string
      */
-    protected $signature = 'data:fresh
+    protected $signature = 'data:prune
                             {--force : Force the operation to run in production}';
 
     /**
@@ -32,7 +25,7 @@ class DataMigrateFreshCommand extends Command implements Isolatable
      *
      * @var string
      */
-    protected $description = 'Reset and re-run all data migrations';
+    protected $description = 'Remove tracking records whose migration file no longer exists';
 
     /**
      * The migrator instance.
@@ -71,23 +64,34 @@ class DataMigrateFreshCommand extends Command implements Isolatable
             return self::FAILURE;
         }
 
-        $this->info('Resetting data migration records...');
+        if (count($this->migrator->getMigrationFiles()) === 0) {
+            if ($repository->getMigrations()->isNotEmpty()) {
+                /** @var string $path */
+                $path = config('data-migrations.path');
 
-        $migrations = $repository->getMigrations();
+                $this->error("No data migration files found in {$path}. Refusing to prune every record.");
 
-        // Wrap deletion in a transaction for atomicity
-        DB::transaction(function () use ($repository, $migrations): void {
-            foreach ($migrations as $migration) {
-                $repository->delete($migration->migration);
-                $this->line("<comment>Reset:</comment> {$migration->migration}");
+                return self::FAILURE;
             }
-        });
+        }
+
+        $orphaned = $this->migrator->getOrphanedMigrations();
+
+        if ($orphaned->isEmpty()) {
+            $this->info('No orphaned records found.');
+
+            return self::SUCCESS;
+        }
+
+        foreach ($orphaned as $record) {
+            $this->line("<comment>Pruned:</comment> {$record->migration}");
+            $repository->delete($record->migration);
+        }
 
         $this->newLine();
+        $this->info("{$orphaned->count()} orphaned record(s) pruned.");
 
-        return $this->call('data:migrate', [
-            '--force' => $this->option('force'),
-        ]);
+        return self::SUCCESS;
     }
 
     /**
@@ -102,7 +106,7 @@ class DataMigrateFreshCommand extends Command implements Isolatable
 
         if ($shouldConfirm && app()->environment('production')) {
             return (bool) $this->option('force') || $this->confirm(
-                'You are about to reset ALL data migration records in production. This is DANGEROUS. Continue?'
+                'You are about to delete orphaned data migration records in production. Continue?'
             );
         }
 
