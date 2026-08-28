@@ -30,6 +30,7 @@
 - [Testing](#testing)
 - [Best Practices](#best-practices)
 - [Contributing](#contributing)
+- [Upgrading](#upgrading)
 - [License](#license)
 
 ---
@@ -1340,7 +1341,7 @@ Available assertions: `assertRan($name)`, `assertNotRan($name)`, `assertNothingR
 ### For Safety
 
 1. **Make migrations idempotent** — Safe to re-run if interrupted
-2. **Implement `down()` when possible** — Enables rollback
+2. **Implement `Reversible` when possible** — Enables rollback
 3. **Use row counting** — Call `$this->affected()` for accurate logging
 4. **Enable auto-backup** — For critical data transformations
 
@@ -1370,6 +1371,12 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for det
 ## Changelog
 
 Please see [CHANGELOG.md](CHANGELOG.md) for recent changes.
+
+---
+
+## Upgrading
+
+Coming from 1.x? [UPGRADING.md](UPGRADING.md) lists every breaking change of 2.0.0 and the steps to apply, including the tracking table upgrade migration (`php artisan vendor:publish --tag=data-migrations-upgrade`, then `php artisan migrate`).
 
 ---
 

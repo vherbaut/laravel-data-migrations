@@ -30,6 +30,7 @@
 - [Tests](#tests)
 - [Bonnes pratiques](#bonnes-pratiques)
 - [Contribution](#contribution)
+- [Mise à niveau](#mise-à-niveau)
 - [Licence](#licence)
 
 ---
@@ -1340,7 +1341,7 @@ Assertions disponibles : `assertRan($name)`, `assertNotRan($name)`, `assertNothi
 ### Pour la sécurité
 
 1. **Rendez les migrations idempotentes** — Sûres à ré-exécuter si interrompues
-2. **Implémentez `down()` quand possible** — Permet le rollback
+2. **Implémentez `Reversible` quand possible** — Permet le rollback
 3. **Utilisez le comptage de lignes** — Appelez `$this->affected()` pour un logging précis
 4. **Activez la sauvegarde automatique** — Pour les transformations de données critiques
 
@@ -1370,6 +1371,12 @@ Les contributions sont les bienvenues ! Veuillez consulter [CONTRIBUTING.md](CON
 ## Changelog
 
 Veuillez consulter [CHANGELOG.md](CHANGELOG.md) pour les changements récents.
+
+---
+
+## Mise à niveau
+
+Vous venez de la 1.x ? [UPGRADING.md](UPGRADING.md) liste chaque changement cassant de la 2.0.0 et la marche à suivre, dont la migration de mise à niveau de la table de suivi (`php artisan vendor:publish --tag=data-migrations-upgrade`, puis `php artisan migrate`).
 
 ---
 

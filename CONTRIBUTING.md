@@ -35,12 +35,12 @@ Feature suggestions are welcome! Please:
 
 ### Pull Requests
 
-1. **Fork the repository** and create your branch from `main`
+1. **Fork the repository** and create your branch from `develop`
 2. **Install dependencies**: `composer install`
 3. **Make your changes** following our coding standards
 4. **Add tests** for any new functionality
 5. **Run tests**: `composer test`
-6. **Run PHPStan**: `composer phpstan`
+6. **Run PHPStan and Pint**: `composer phpstan` and `composer pint:test`, or everything at once with `composer check`
 7. **Commit your changes** with a descriptive message
 8. **Push to your fork** and submit a pull request
 
@@ -59,6 +59,9 @@ composer test
 
 # Run static analysis
 composer phpstan
+
+# Run Pint, PHPStan and the tests together
+composer check
 ```
 
 ## Coding Standards
@@ -66,7 +69,7 @@ composer phpstan
 ### PHP Standards
 
 - Follow PSR-1, PSR-2, and PSR-12
-- Use PHP 8.1+ features where appropriate
+- Use PHP 8.2+ features where appropriate
 - Always use strict types: `declare(strict_types=1);`
 - Use typed properties and return types
 - Document with PHPDoc when types aren't sufficient
@@ -79,7 +82,7 @@ composer phpstan
 
 ### Code Quality
 
-- **PHPStan Level 5**: All code must pass PHPStan analysis at level 5
+- **PHPStan Level 6**: All code must pass PHPStan analysis at level 6
 - **Tests Required**: New features must include tests
 - **Documentation**: Update README.md for user-facing changes
 
@@ -141,7 +144,7 @@ it('runs pending migrations successfully', function (): void {
 
 ## Static Analysis
 
-All code must pass PHPStan at level 5:
+All code must pass PHPStan at level 6:
 
 ```bash
 composer phpstan

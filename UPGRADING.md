@@ -2,7 +2,7 @@
 
 ## From 1.x to 2.0.0
 
-2.0.0 is a major release. Read this guide before running `composer update`: each section names a breaking change, who is affected and what to do. Sections are ordered the way you will meet them: dependencies first, then the tracking table, then your migration files, then custom integrations.
+2.0.0 is a major release. Read this guide before running `composer update`: each section names a breaking change, who is affected and what to do. Sections are ordered the way you will meet them: dependencies first, then the tracking table, then your migration files and commands, then custom integrations.
 
 ### Requirements
 
@@ -10,6 +10,32 @@
 - Laravel 12 or 13. Laravel 10 and 11 reached end of life, and Composer 2.9 or later refuses to install them because of their published security advisories.
 
 Change the constraint in your `composer.json` to `"vherbaut/laravel-data-migrations": "^2.0"` and run `composer update`.
+
+### Tracking table schema
+
+The tracking table changes shape:
+
+| Column | 1.x | 2.0 |
+|---|---|---|
+| `status` | `enum('pending', 'running', 'completed', 'failed', 'rolled_back')`, default `'pending'` | `string(20)`, no default |
+| `rows_affected`, `duration_ms` | `unsignedInteger` | `unsignedBigInteger` |
+| Indexes | `unique(migration)`, `index(batch, status)` | the same, plus `index(status)` |
+
+New installs get this shape from the package migration. Existing installs run the upgrade migration shipped in `database/upgrades/`, which is never loaded automatically:
+
+```bash
+php artisan vendor:publish --tag=data-migrations-upgrade
+php artisan migrate
+```
+
+The migration reads `data-migrations.table` and `data-migrations.connection`, converts the columns in place, adds the missing index and keeps every row. It is safe to run again and does nothing on a table already in the 2.0 shape, so the published copy can stay in `database/migrations`. Back up the tracking table first: it is small, and `migrate:rollback` does not restore the 1.x shape.
+
+Driver notes:
+
+- MySQL and MariaDB: one `ALTER TABLE ... MODIFY` per column; the enum labels become their string values. Nothing is transactional there, so run `migrate` again if the process is interrupted.
+- PostgreSQL: the CHECK constraint created for the enum is looked up in `pg_constraint` and dropped before the type change. Verify afterwards with `\d data_migrations` that no `_check` constraint remains on `status`.
+- SQLite: `change()` rebuilds the table, which drops the constraint and the default by itself.
+- SQL Server: the CHECK constraint is looked up in `sys.check_constraints`, and the `(batch, status)` index is dropped then recreated because SQL Server refuses to shrink an indexed `nvarchar` column (error 5074). If `migrate` fails with error 5074 or 3701, drop that index and any CHECK constraint on `status` yourself (`select name from sys.check_constraints where parent_object_id = object_id('data_migrations')`), then run `migrate` again.
 
 ### Timeout removed
 
@@ -87,32 +113,6 @@ $processed = $this->chunk('users', fn ($user) => $this->process($user));
 ```
 
 The `chunk_size` config key is removed: no code ever read it, and `$chunkSize` keeps its `int` type so that migrations declaring `protected int $chunkSize = 500;` keep working. Set the chunk size on the migration, or pass it to the helper.
-
-### Tracking table schema
-
-The tracking table changes shape:
-
-| Column | 1.x | 2.0 |
-|---|---|---|
-| `status` | `enum('pending', 'running', 'completed', 'failed', 'rolled_back')`, default `'pending'` | `string(20)`, no default |
-| `rows_affected`, `duration_ms` | `unsignedInteger` | `unsignedBigInteger` |
-| Indexes | `unique(migration)`, `index(batch, status)` | the same, plus `index(status)` |
-
-New installs get this shape from the package migration. Existing installs run the upgrade migration shipped in `database/upgrades/`, which is never loaded automatically:
-
-```bash
-php artisan vendor:publish --tag=data-migrations-upgrade
-php artisan migrate
-```
-
-The migration reads `data-migrations.table` and `data-migrations.connection`, converts the columns in place, adds the missing index and keeps every row. It is safe to run again and does nothing on a table already in the 2.0 shape, so the published copy can stay in `database/migrations`. Back up the tracking table first: it is small, and `migrate:rollback` does not restore the 1.x shape.
-
-Driver notes:
-
-- MySQL and MariaDB: one `ALTER TABLE ... MODIFY` per column; the enum labels become their string values. Nothing is transactional there, so run `migrate` again if the process is interrupted.
-- PostgreSQL: the CHECK constraint created for the enum is looked up in `pg_constraint` and dropped before the type change. Verify afterwards with `\d data_migrations` that no `_check` constraint remains on `status`.
-- SQLite: `change()` rebuilds the table, which drops the constraint and the default by itself.
-- SQL Server: the CHECK constraint is looked up in `sys.check_constraints`, and the `(batch, status)` index is dropped then recreated because SQL Server refuses to shrink an indexed `nvarchar` column (error 5074). If `migrate` fails with error 5074 or 3701, drop that index and any CHECK constraint on `status` yourself (`select name from sys.check_constraints where parent_object_id = object_id('data_migrations')`), then run `migrate` again.
 
 ### Retry and unresolved migrations
 
