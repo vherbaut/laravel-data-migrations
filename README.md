@@ -156,9 +156,9 @@ class FixUserEmailsSeeder extends Seeder
 | **Transaction Support** | Automatic transaction wrapping with configurable modes |
 | **Auto Backup** | Optional automatic backup before migrations (requires [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
 | **Events** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations` for notifications and audit |
-| **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:fresh` |
+| **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:refresh` |
 | **Row Threshold Alerts** | Confirmation prompts for large operations |
-| **PHPStan Level 5** | Fully typed, strict static analysis compliance |
+| **PHPStan Level 6** | Fully typed, strict static analysis compliance |
 | **Test Helpers** | `InteractsWithDataMigrations` trait and `DataMigrations::fake()` for your test suite |
 | **Chained Runs** | Optional `run_after_migrate` hook running `data:migrate` after `php artisan migrate` |
 
@@ -307,7 +307,7 @@ Total: 2 | Pending: 1 | Completed: 1 | Failed: 0
 | `data:migrate` | Run all pending data migrations |
 | `data:rollback` | Rollback the last batch of migrations |
 | `data:status` | Display the status of all migrations |
-| `data:fresh` | Reset and re-run all data migrations |
+| `data:refresh` | Roll back every data migration then run them again |
 | `data:prune` | Remove tracking records whose migration file no longer exists |
 
 ### make:data-migration
@@ -353,13 +353,14 @@ php artisan data:migrate [options]
 | `--force` | Force execution in production environment |
 | `--step` | Assign a separate batch number to each migration so they can be rolled back individually |
 | `--no-confirm` | Skip row count confirmation prompts |
+| `--retry-failed` | Run again the migrations recorded as failed, or still running after a crash (see below) |
 | `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 | `--path=*` | Only use the data migrations found in these directories (repeatable, relative to the base path unless `--realpath`) |
 | `--realpath` | Treat `--path` values as absolute paths |
 
-#### Retrying failed or rolled back migrations
+#### Failed, running and rolled back migrations
 
-Migrations recorded as `failed` or `rolled_back` are treated as pending: the next `data:migrate` runs them again and replaces the previous record. `data:rollback` only targets `completed` (or still `running`) migrations.
+A migration recorded as `rolled_back` is pending again: the next `data:migrate` runs it and replaces the previous record. A migration recorded as `failed`, or still `running` after its process died, blocks `data:migrate` (exit code 1, list of the migrations) until you pass `--retry-failed`, which runs them again in file order together with the pending ones. A migration declaring `$idempotent = true` is retried without the option. `data:rollback` only targets `completed` migrations.
 
 ### data:rollback
 
@@ -407,12 +408,12 @@ php artisan data:status [options]
 
 Records whose migration file has been deleted are listed too, flagged `(orphaned)` in the table and counted in the summary line. Remove them with `data:prune`.
 
-### data:fresh
+### data:refresh
 
-Reset and re-run all data migrations.
+Roll back every completed migration that implements `Reversible`, then run the pending migrations again.
 
 ```bash
-php artisan data:fresh [options]
+php artisan data:refresh [options]
 ```
 
 | Option | Description |
@@ -420,7 +421,7 @@ php artisan data:fresh [options]
 | `--force` | Force execution in production environment |
 | `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 
-> **Warning:** This command will delete all migration records and re-run every migration. Use with caution.
+> **Note:** Migrations that do not implement `Reversible` are skipped and keep their `completed` record. The command refuses to run while a migration is `failed` or `running`: resolve it with `data:migrate --retry-failed` first.
 
 ### data:prune
 
@@ -733,6 +734,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Tracking Table Connection
+    |--------------------------------------------------------------------------
+    |
+    | The database connection holding the tracking table (null = default).
+    |
+    */
+    'connection' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Transaction Mode
     |--------------------------------------------------------------------------
     |
@@ -869,7 +880,7 @@ composer require spatie/laravel-backup
 
 ### Concurrency Lock
 
-Two `data:migrate` processes started at the same time would both try to insert the same tracking record. Pass `--isolated` to `data:migrate`, `data:rollback` or `data:fresh` to take a cache lock first, exactly like `php artisan migrate --isolated`:
+Two `data:migrate` processes started at the same time would both try to insert the same tracking record. Pass `--isolated` to `data:migrate`, `data:rollback` or `data:refresh` to take a cache lock first, exactly like `php artisan migrate --isolated`:
 
 ```bash
 # Skips the run (exit code 0) when another data migration command holds the lock
@@ -879,7 +890,7 @@ php artisan data:migrate --isolated
 php artisan data:migrate --isolated=12
 ```
 
-The three commands share one lock named `data-migrations`, so `data:rollback --isolated` also waits for a running `data:migrate --isolated`. `data:fresh --isolated` keeps the lock while it runs `data:migrate` internally. The lock lives in the cache store given by `lock.store` (the default store when `null`) and expires after `lock.ttl` seconds if the process is killed. Set `lock.enabled` to `true` to take the lock without passing the option:
+The three commands share one lock named `data-migrations`, so `data:rollback --isolated` also waits for a running `data:migrate --isolated`. The lock lives in the cache store given by `lock.store` (the default store when `null`) and expires after `lock.ttl` seconds if the process is killed. Set `lock.enabled` to `true` to take the lock without passing the option:
 
 ```php
 // config/data-migrations.php
@@ -1147,8 +1158,8 @@ src/
 │   ├── Concerns/
 │   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
-│   ├── DataMigrateFreshCommand.php
 │   ├── DataMigratePruneCommand.php
+│   ├── DataMigrateRefreshCommand.php
 │   ├── DataMigrateRollbackCommand.php
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
@@ -1157,11 +1168,14 @@ src/
 ├── Contracts/                   # Interfaces
 ├── DTO/
 │   ├── MigrationRecord.php      # Typed data transfer object
-│   └── MigrationStatus.php      # Row of data:status, JSON shape
+│   └── MigrationStatusEntry.php # Row of data:status, JSON shape
+├── Enums/
+│   └── MigrationStatus.php      # Status of a tracking record
 ├── Exceptions/
 │   ├── InvalidMigrationException.php
 │   ├── MigrationException.php
-│   └── MigrationNotFoundException.php
+│   ├── MigrationNotFoundException.php
+│   └── UnresolvedMigrationsException.php
 ├── Events/
 │   ├── DataMigrationEnded.php
 │   ├── DataMigrationFailed.php

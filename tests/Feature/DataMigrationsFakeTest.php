@@ -91,3 +91,16 @@ it('skips non reversible migrations on rollback like the real migrator', functio
     $fake->assertNothingRolledBack();
     expect(fn () => $fake->assertRolledBack($name))->toThrow(ExpectationFailedException::class);
 });
+
+it('records unresolved migrations as ran with the retry-failed option', function (): void {
+    $file = $this->createTestMigration('fake_retry', dataMigrationContent("throw new RuntimeException('should not run');"));
+    $name = basename($file, '.php');
+    insertDataMigrationRecord($name, 1, 'failed');
+    $fake = DataMigrations::fake();
+
+    expect(DataMigrations::run())->toBe([]);
+    $fake->assertNotRan($name);
+
+    expect(DataMigrations::run(['retry-failed' => true]))->toBe([$file]);
+    $fake->assertRan($name);
+});

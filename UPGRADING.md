@@ -90,19 +90,63 @@ The `chunk_size` config key is removed: no code ever read it, and `$chunkSize` k
 
 ### Tracking table schema
 
-The `status` column becomes a plain string, `rows_affected` and `duration_ms` become unsigned big integers and a `status` index is added. Publish and run the upgrade migration.
+The tracking table changes shape:
+
+| Column | 1.x | 2.0 |
+|---|---|---|
+| `status` | `enum('pending', 'running', 'completed', 'failed', 'rolled_back')`, default `'pending'` | `string(20)`, no default |
+| `rows_affected`, `duration_ms` | `unsignedInteger` | `unsignedBigInteger` |
+| Indexes | `unique(migration)`, `index(batch, status)` | the same, plus `index(status)` |
+
+New installs get this shape from the package migration. Existing installs run the upgrade migration shipped in `database/upgrades/`, which is never loaded automatically:
+
+```bash
+php artisan vendor:publish --tag=data-migrations-upgrade
+php artisan migrate
+```
+
+The migration reads `data-migrations.table` and `data-migrations.connection`, converts the columns in place, adds the missing index and keeps every row. It is safe to run again and does nothing on a table already in the 2.0 shape, so the published copy can stay in `database/migrations`. Back up the tracking table first: it is small, and `migrate:rollback` does not restore the 1.x shape.
+
+Driver notes:
+
+- MySQL and MariaDB: one `ALTER TABLE ... MODIFY` per column; the enum labels become their string values. Nothing is transactional there, so run `migrate` again if the process is interrupted.
+- PostgreSQL: the CHECK constraint created for the enum is looked up in `pg_constraint` and dropped before the type change. Verify afterwards with `\d data_migrations` that no `_check` constraint remains on `status`.
+- SQLite: `change()` rebuilds the table, which drops the constraint and the default by itself.
+- SQL Server: the CHECK constraint is looked up in `sys.check_constraints`, and the `(batch, status)` index is dropped then recreated because SQL Server refuses to shrink an indexed `nvarchar` column (error 5074). If `migrate` fails with error 5074 or 3701, drop that index and any CHECK constraint on `status` yourself (`select name from sys.check_constraints where parent_object_id = object_id('data_migrations')`), then run `migrate` again.
 
 ### Retry and unresolved migrations
 
-A migration recorded as `failed`, or still `running` after a crash, blocks `data:migrate` until `--retry-failed` is passed, unless the migration declares `$idempotent = true`. A `rolled_back` migration runs again on the next `data:migrate`. A `running` record can no longer be rolled back.
+In 1.x, a migration recorded as `failed` was silently run again by the next `data:migrate`, and a record left as `running` by a killed process counted as completed and could even be rolled back. In 2.0 both statuses are unresolved:
+
+- `data:migrate` refuses to run while an unresolved migration still has a file: it lists their names, advises `--retry-failed` and exits with code 1 (`UnresolvedMigrationsException`, a `MigrationException`). Nothing runs, not even the pending migrations.
+- `data:migrate --retry-failed` replaces their record and runs them again, in file order together with the pending migrations. Make sure no other process is still running them first.
+- A migration declaring `protected bool $idempotent = true;` is retried without the option, since running it twice is safe by definition. The property was documented but never read in 1.x.
+- `data:rollback` ignores `running` records.
+- A `rolled_back` migration is pending again and runs on the next `data:migrate`, as before.
+- A record whose file no longer exists never blocks a run: `data:status` lists it as orphaned and `data:prune` deletes it.
+
+`MigratorInterface::run()` accepts the `retry-failed` option, `getPendingMigrations()` no longer lists the non idempotent unresolved migrations, and `MigratorFake::run()` records the unresolved files too when the option is passed.
 
 ### `data:fresh` renamed `data:refresh`
 
-`data:refresh` rolls back every completed migration that implements `Reversible`, then runs the pending migrations. It no longer deletes the tracking records.
+`data:fresh` deleted every tracking record and ran every `up()` again on data that had already been transformed. It is replaced by `data:refresh`, modelled on `migrate:refresh`: every completed migration implementing `Reversible` is rolled back, most recent first, then the pending migrations run. Migrations without `Reversible` are skipped and keep their record. Unresolved migrations make the command fail: resolve them with `data:migrate --retry-failed` first.
+
+Update the scripts calling `data:fresh`. `data:refresh` keeps `--force` and `--isolated`. The rollback and the run happen in one process, so `DataMigrationsCommandMutex` no longer counts nested commands and is no longer a singleton.
+
+To forget every record and run everything again, which is what `data:fresh` did, truncate the tracking table yourself and run `data:migrate`.
+
+### Status enum, records and repository
+
+`Vherbaut\DataMigrations\Enums\MigrationStatus` (`Pending`, `Running`, `Completed`, `Failed`, `RolledBack`) replaces the status strings:
+
+- `MigrationRecord::$status` is a `MigrationStatus`. The `isCompleted()` family is unchanged; compare with `$record->status === MigrationStatus::Completed` or read `$record->status->value`.
+- The `data:status` row object `Vherbaut\DataMigrations\DTO\MigrationStatus` is renamed `MigrationStatusEntry` and its `$status` property is the enum. The JSON printed by `data:status --json` is unchanged.
+- `MigrationRepositoryInterface` gains `getUnresolved()` and loses `setConnection()`: the connection is the third constructor argument of `MigrationRepository`, filled from the new `connection` config key (null = default connection). The package migrations use that connection too.
+- `getRan()`, `hasRun()`, `getLast()`, `getRollbackable()` and `getRollbackableByBatch()` only consider `completed` records, and `logStart()` replaces any previous record of the migration.
 
 ### Interfaces and output
 
-`MigrationInterface::setOutput()` and `MigratorInterface::setOutput()` receive a `Vherbaut\DataMigrations\Contracts\MigrationOutput` instead of `Illuminate\Console\OutputStyle`. `MigratorInterface::getNotes()` and the `dry-run` option of `run()` are gone. `MigrationRepositoryInterface` gains `getUnresolved()` and loses `setConnection()`. The `data:status` row object `MigrationStatus` is renamed `MigrationStatusEntry`; the `MigrationStatus` name now belongs to the status enum.
+`MigrationInterface::setOutput()` and `MigratorInterface::setOutput()` receive a `Vherbaut\DataMigrations\Contracts\MigrationOutput` instead of `Illuminate\Console\OutputStyle`. `MigratorInterface::getNotes()` and the `dry-run` option of `run()` are gone.
 
 ### Backup
 
@@ -110,7 +154,7 @@ A migration recorded as `failed`, or still `running` after a crash, blocks `data
 
 ### Testing helpers
 
-`InteractsWithDataMigrations::dataMigrationStatus()` returns the `MigrationStatus` enum. `MigratorFake` follows the `MigratorInterface` changes above.
+`InteractsWithDataMigrations::dataMigrationStatus()` returns a `MigrationStatus` (or null); the `assertDataMigration*()` helpers are unchanged. `MigratorFake::run(['retry-failed' => true])` records the unresolved migrations as ran, and `MigratorFake` follows the `MigratorInterface` changes described above.
 
 ### Coming from 1.1.x
 

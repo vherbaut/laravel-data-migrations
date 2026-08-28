@@ -20,6 +20,7 @@ use Vherbaut\DataMigrations\Events\DataMigrationEnded;
 use Vherbaut\DataMigrations\Events\DataMigrationFailed;
 use Vherbaut\DataMigrations\Events\DataMigrationStarted;
 use Vherbaut\DataMigrations\Events\NoPendingDataMigrations;
+use Vherbaut\DataMigrations\Exceptions\UnresolvedMigrationsException;
 
 /**
  * Orchestrates data migration execution.
@@ -109,14 +110,25 @@ class Migrator implements MigratorInterface
     /**
      * Run the pending migrations.
      *
+     * Migrations recorded as failed, or as still running after their process
+     * died, block the run unless the "retry-failed" option is set or the
+     * migration is idempotent.
+     *
      * @param array<string, mixed> $options
      * @return array<int, string>
+     * @throws UnresolvedMigrationsException
      * @throws Throwable
      */
     public function run(array $options = []): array
     {
         $this->notes = [];
-        $migrations = $this->getPendingMigrations();
+        $retryUnresolved = (bool) ($options['retry-failed'] ?? false);
+
+        if (! $retryUnresolved) {
+            $this->ensureNothingIsUnresolved();
+        }
+
+        $migrations = $this->migrationsToRun($retryUnresolved);
 
         if (count($migrations) === 0) {
             $this->note('<info>Nothing to migrate.</info>');
@@ -399,12 +411,69 @@ class Migrator implements MigratorInterface
      */
     public function getPendingMigrations(): array
     {
-        $files = $this->getMigrationFiles();
-        $ran = $this->repository->getRan();
+        return $this->migrationsToRun(false);
+    }
 
-        return Collection::make($files)
-            ->reject(fn (string $file): bool => in_array($this->getMigrationName($file), $ran, true))
+    /**
+     * Get the files to run: never completed, and among the unresolved ones only
+     * the idempotent migrations unless every unresolved migration is retried.
+     *
+     * @param bool $retryUnresolved
+     * @return array<int, string>
+     */
+    protected function migrationsToRun(bool $retryUnresolved): array
+    {
+        $completed = $this->repository->getRan();
+        $unresolved = $this->unresolvedNames();
+
+        return Collection::make($this->getMigrationFiles())
+            ->reject(fn (string $file): bool => in_array($this->getMigrationName($file), $completed, true))
+            ->filter(function (string $file) use ($unresolved, $retryUnresolved): bool {
+                if (! in_array($this->getMigrationName($file), $unresolved, true)) {
+                    return true;
+                }
+
+                if ($retryUnresolved) {
+                    return true;
+                }
+
+                return $this->resolve($file)->isIdempotent();
+            })
             ->values()
+            ->all();
+    }
+
+    /**
+     * Refuse to run while a non idempotent migration with a file is unresolved.
+     *
+     * @return void
+     * @throws UnresolvedMigrationsException
+     */
+    protected function ensureNothingIsUnresolved(): void
+    {
+        $unresolved = $this->unresolvedNames();
+
+        $blocking = Collection::make($this->getMigrationFiles())
+            ->filter(fn (string $file): bool => in_array($this->getMigrationName($file), $unresolved, true))
+            ->reject(fn (string $file): bool => $this->resolve($file)->isIdempotent())
+            ->map(fn (string $file): string => $this->getMigrationName($file))
+            ->values()
+            ->all();
+
+        if ($blocking !== []) {
+            throw UnresolvedMigrationsException::forMigrations($blocking);
+        }
+    }
+
+    /**
+     * Names of the migrations recorded as failed or still running.
+     *
+     * @return array<int, string>
+     */
+    protected function unresolvedNames(): array
+    {
+        return $this->repository->getUnresolved()
+            ->map(fn (MigrationRecord $record): string => $record->migration)
             ->all();
     }
 

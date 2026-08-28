@@ -71,23 +71,23 @@ it('releases the lock after a failing migration', function (): void {
     expect(Cache::lock('data-migrations')->get())->toBeTrue();
 });
 
-it('shares the lock between data:migrate, data:rollback and data:fresh', function (): void {
+it('shares the lock between data:migrate, data:rollback and data:refresh', function (): void {
     Cache::lock('data-migrations')->get();
 
     $this->artisan('data:rollback', ['--force' => true, '--isolated' => true])
         ->expectsOutputToContain('already running')
         ->assertSuccessful();
 
-    $this->artisan('data:fresh', ['--force' => true, '--isolated' => true])
+    $this->artisan('data:refresh', ['--force' => true, '--isolated' => true])
         ->expectsOutputToContain('already running')
         ->assertSuccessful();
 });
 
-it('runs data:fresh --isolated including the nested data:migrate when lock.enabled is set', function (): void {
+it('runs data:refresh --isolated when lock.enabled is set', function (): void {
     config()->set('data-migrations.lock.enabled', true);
-    $this->createTestMigration('isolated_fresh', dataMigrationContent('$this->affected(1);'));
+    $this->createTestMigration('isolated_refresh', dataMigrationContent('$this->affected(1);'));
 
-    $this->artisan('data:fresh', ['--force' => true, '--isolated' => true])->assertSuccessful();
+    $this->artisan('data:refresh', ['--force' => true, '--isolated' => true])->assertSuccessful();
 
     expect(DB::table('data_migrations')->where('status', 'completed')->count())->toBe(1)
         ->and(Cache::lock('data-migrations')->get())->toBeTrue();

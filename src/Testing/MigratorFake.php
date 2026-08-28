@@ -68,6 +68,10 @@ class MigratorFake implements MigratorInterface
     {
         $files = $this->migrator->getPendingMigrations();
 
+        if ((bool) ($options['retry-failed'] ?? false)) {
+            $files = $this->withUnresolvedFiles($files);
+        }
+
         if ($this->isDryRun($options)) {
             return $files;
         }
@@ -269,6 +273,28 @@ class MigratorFake implements MigratorInterface
             $this->rolledBack,
             'Data migrations were rolled back: '.implode(', ', $this->rolledBack),
         );
+    }
+
+    /**
+     * Add the files of the unresolved migrations, in file order.
+     *
+     * @param array<int, string> $files
+     * @return array<int, string>
+     */
+    protected function withUnresolvedFiles(array $files): array
+    {
+        foreach ($this->migrator->getRepository()->getUnresolved() as $record) {
+            $file = $this->findMigrationFile($record->migration);
+
+            if ($file !== null) {
+                $files[] = $file;
+            }
+        }
+
+        $files = array_values(array_unique($files));
+        usort($files, fn (string $left, string $right): int => strcmp(basename($left), basename($right)));
+
+        return $files;
     }
 
     /**

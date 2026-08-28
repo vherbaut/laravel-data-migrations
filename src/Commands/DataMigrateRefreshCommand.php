@@ -7,14 +7,16 @@ namespace Vherbaut\DataMigrations\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Console\ConfirmableTrait;
 use Illuminate\Contracts\Console\Isolatable;
-use Illuminate\Support\Facades\DB;
+use Throwable;
 use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Exceptions\MigrationException;
 
 /**
- * Command to reset and re-run all data migrations.
+ * Roll back every completed data migration that can be reverted, then run
+ * the pending migrations again.
  */
-class DataMigrateFreshCommand extends Command implements Isolatable
+class DataMigrateRefreshCommand extends Command implements Isolatable
 {
     use ConfirmableTrait;
     use IsolatesDataMigrations;
@@ -24,7 +26,7 @@ class DataMigrateFreshCommand extends Command implements Isolatable
      *
      * @var string
      */
-    protected $signature = 'data:fresh
+    protected $signature = 'data:refresh
                             {--force : Force the operation to run in production}';
 
     /**
@@ -32,18 +34,14 @@ class DataMigrateFreshCommand extends Command implements Isolatable
      *
      * @var string
      */
-    protected $description = 'Reset and re-run all data migrations';
+    protected $description = 'Roll back every data migration then run them again';
 
     /**
-     * The migrator instance.
-     *
      * @var MigratorInterface
      */
     protected MigratorInterface $migrator;
 
     /**
-     * Create a new command instance.
-     *
      * @param MigratorInterface $migrator
      */
     public function __construct(MigratorInterface $migrator)
@@ -63,35 +61,36 @@ class DataMigrateFreshCommand extends Command implements Isolatable
             return self::FAILURE;
         }
 
-        $repository = $this->migrator->getRepository();
+        $this->migrator->setOutput($this->output);
 
-        if (! $repository->repositoryExists()) {
+        if (! $this->migrator->getRepository()->repositoryExists()) {
             $this->error('Data migrations table not found. Run: php artisan migrate');
 
             return self::FAILURE;
         }
 
-        $this->info('Resetting data migration records...');
+        try {
+            $this->migrator->rollback(['all' => true]);
+            $this->migrator->run();
 
-        $migrations = $repository->getMigrations();
+            return self::SUCCESS;
+        } catch (MigrationException $exception) {
+            $this->error("Migration error: {$exception->getMessage()}");
 
-        // Wrap deletion in a transaction for atomicity
-        DB::transaction(function () use ($repository, $migrations): void {
-            foreach ($migrations as $migration) {
-                $repository->delete($migration->migration);
-                $this->line("<comment>Reset:</comment> {$migration->migration}");
+            return self::FAILURE;
+        } catch (Throwable $exception) {
+            $this->error("Unexpected error: {$exception->getMessage()}");
+
+            if ($this->output->isVerbose()) {
+                $this->line($exception->getTraceAsString());
             }
-        });
 
-        $this->newLine();
-
-        return $this->call('data:migrate', [
-            '--force' => $this->option('force'),
-        ]);
+            return self::FAILURE;
+        }
     }
 
     /**
-     * Determine if the command should proceed.
+     * Confirm before running in production, unless --force is given.
      *
      * @return bool
      */
@@ -100,12 +99,18 @@ class DataMigrateFreshCommand extends Command implements Isolatable
         /** @var bool $shouldConfirm */
         $shouldConfirm = config('data-migrations.safety.require_force_in_production', true);
 
-        if ($shouldConfirm && app()->environment('production')) {
-            return (bool) $this->option('force') || $this->confirm(
-                'You are about to reset ALL data migration records in production. This is DANGEROUS. Continue?'
-            );
+        if (! $shouldConfirm) {
+            return true;
         }
 
-        return true;
+        if (! app()->environment('production')) {
+            return true;
+        }
+
+        if ((bool) $this->option('force')) {
+            return true;
+        }
+
+        return $this->confirm('You are about to roll back and run again ALL data migrations in production. Continue?');
     }
 }

@@ -4,20 +4,21 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
+use Vherbaut\DataMigrations\Migration\MigrationRepository;
 
 beforeEach(function (): void {
     $this->artisan('migrate');
     $this->repository = app(MigrationRepositoryInterface::class);
 });
 
-it('returns only completed and running records from getRollbackable', function (): void {
+it('returns only completed records from getRollbackable', function (): void {
     insertDataMigrationRecord('a_completed', 1, 'completed');
     insertDataMigrationRecord('b_running', 2, 'running');
     insertDataMigrationRecord('c_failed', 3, 'failed');
     insertDataMigrationRecord('d_rolled_back', 4, 'rolled_back');
 
     expect($this->repository->getRollbackable()->pluck('migration')->all())
-        ->toBe(['b_running', 'a_completed']);
+        ->toBe(['a_completed']);
 });
 
 it('applies the steps limit after filtering rollbackable records', function (): void {
@@ -27,13 +28,14 @@ it('applies the steps limit after filtering rollbackable records', function (): 
     insertDataMigrationRecord('d_rolled_back', 4, 'rolled_back');
 
     expect($this->repository->getRollbackable(1)->pluck('migration')->all())
-        ->toBe(['b_running']);
+        ->toBe(['a_completed']);
 });
 
-it('returns only completed and running records from getRollbackableByBatch', function (): void {
+it('returns only completed records from getRollbackableByBatch', function (): void {
     insertDataMigrationRecord('a_completed', 1, 'completed');
     insertDataMigrationRecord('b_rolled_back', 1, 'rolled_back');
     insertDataMigrationRecord('c_failed', 1, 'failed');
+    insertDataMigrationRecord('d_running', 1, 'running');
 
     expect($this->repository->getRollbackableByBatch(1)->pluck('migration')->all())
         ->toBe(['a_completed']);
@@ -60,14 +62,16 @@ it('records a running migration on logStart', function (): void {
         ->and($record->started_at)->not->toBeNull();
 });
 
-it('replaces failed and rolled back records on logStart', function (): void {
+it('replaces any previous record of the migration on logStart', function (): void {
     insertDataMigrationRecord('retried_failed', 1, 'failed');
     insertDataMigrationRecord('retried_rolled_back', 1, 'rolled_back');
+    insertDataMigrationRecord('retried_running', 1, 'running');
 
     $this->repository->logStart('retried_failed', 2);
     $this->repository->logStart('retried_rolled_back', 2);
+    $this->repository->logStart('retried_running', 2);
 
-    expect(DB::table('data_migrations')->count())->toBe(2)
+    expect(DB::table('data_migrations')->count())->toBe(3)
         ->and(DB::table('data_migrations')->pluck('status')->unique()->all())->toBe(['running'])
         ->and(DB::table('data_migrations')->pluck('batch')->unique()->all())->toBe([2]);
 });
@@ -117,14 +121,14 @@ it('computes the next batch number from every record regardless of status', func
         ->and($this->repository->getNextBatchNumber())->toBe(5);
 });
 
-it('reports hasRun only for completed and running records', function (): void {
+it('reports hasRun only for completed records', function (): void {
     insertDataMigrationRecord('a_completed', 1, 'completed');
     insertDataMigrationRecord('b_running', 1, 'running');
     insertDataMigrationRecord('c_failed', 1, 'failed');
     insertDataMigrationRecord('d_rolled_back', 1, 'rolled_back');
 
     expect($this->repository->hasRun('a_completed'))->toBeTrue()
-        ->and($this->repository->hasRun('b_running'))->toBeTrue()
+        ->and($this->repository->hasRun('b_running'))->toBeFalse()
         ->and($this->repository->hasRun('c_failed'))->toBeFalse()
         ->and($this->repository->hasRun('d_rolled_back'))->toBeFalse()
         ->and($this->repository->hasRun('unknown'))->toBeFalse();
@@ -151,10 +155,37 @@ it('deletes a record by name', function (): void {
     expect(DB::table('data_migrations')->pluck('migration')->all())->toBe(['kept']);
 });
 
-it('returns ran migration names ordered by batch', function (): void {
+it('returns completed migration names ordered by batch', function (): void {
     insertDataMigrationRecord('z_first_batch', 1, 'completed');
-    insertDataMigrationRecord('a_second_batch', 2, 'running');
-    insertDataMigrationRecord('m_failed', 3, 'failed');
+    insertDataMigrationRecord('a_second_batch', 2, 'completed');
+    insertDataMigrationRecord('b_running', 3, 'running');
+    insertDataMigrationRecord('m_failed', 4, 'failed');
 
     expect($this->repository->getRan())->toBe(['z_first_batch', 'a_second_batch']);
+});
+
+it('returns failed and running records from getUnresolved ordered by batch and name', function (): void {
+    insertDataMigrationRecord('z_running', 1, 'running');
+    insertDataMigrationRecord('a_completed', 2, 'completed');
+    insertDataMigrationRecord('b_failed', 2, 'failed');
+    insertDataMigrationRecord('c_rolled_back', 3, 'rolled_back');
+
+    expect($this->repository->getUnresolved()->pluck('migration')->all())->toBe(['z_running', 'b_failed']);
+});
+
+it('ignores running records when looking for the last batch', function (): void {
+    insertDataMigrationRecord('a_completed', 1, 'completed');
+    insertDataMigrationRecord('b_running', 2, 'running');
+
+    expect($this->repository->getLast()->pluck('migration')->all())->toBe(['a_completed']);
+});
+
+it('uses the connection given to the constructor', function (): void {
+    config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+
+    $default = new MigrationRepository(app('db'), 'data_migrations');
+    $other = new MigrationRepository(app('db'), 'data_migrations', 'other');
+
+    expect($default->repositoryExists())->toBeTrue()
+        ->and($other->repositoryExists())->toBeFalse();
 });

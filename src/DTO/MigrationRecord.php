@@ -7,6 +7,7 @@ namespace Vherbaut\DataMigrations\DTO;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Exception;
+use Vherbaut\DataMigrations\Enums\MigrationStatus;
 
 /**
  * Data Transfer Object for migration records.
@@ -17,7 +18,7 @@ final readonly class MigrationRecord
      * @param int $id
      * @param string $migration
      * @param int $batch
-     * @param string $status
+     * @param MigrationStatus $status
      * @param int|null $rowsAffected
      * @param int|null $durationMs
      * @param string|null $errorMessage
@@ -31,7 +32,7 @@ final readonly class MigrationRecord
         public int $id,
         public string $migration,
         public int $batch,
-        public string $status,
+        public MigrationStatus $status,
         public ?int $rowsAffected,
         public ?int $durationMs,
         public ?string $errorMessage,
@@ -55,7 +56,7 @@ final readonly class MigrationRecord
             id: (int) $record->id,
             migration: (string) $record->migration,
             batch: (int) $record->batch,
-            status: (string) $record->status,
+            status: MigrationStatus::from((string) $record->status),
             rowsAffected: isset($record->rows_affected) ? (int) $record->rows_affected : null,
             durationMs: isset($record->duration_ms) ? (int) $record->duration_ms : null,
             errorMessage: $record->error_message ?? null,
@@ -74,7 +75,7 @@ final readonly class MigrationRecord
      */
     public function isPending(): bool
     {
-        return $this->status === 'pending';
+        return $this->status === MigrationStatus::Pending;
     }
 
     /**
@@ -84,7 +85,7 @@ final readonly class MigrationRecord
      */
     public function isRunning(): bool
     {
-        return $this->status === 'running';
+        return $this->status === MigrationStatus::Running;
     }
 
     /**
@@ -94,7 +95,7 @@ final readonly class MigrationRecord
      */
     public function isCompleted(): bool
     {
-        return $this->status === 'completed';
+        return $this->status === MigrationStatus::Completed;
     }
 
     /**
@@ -104,7 +105,7 @@ final readonly class MigrationRecord
      */
     public function isFailed(): bool
     {
-        return $this->status === 'failed';
+        return $this->status === MigrationStatus::Failed;
     }
 
     /**
@@ -114,6 +115,6 @@ final readonly class MigrationRecord
      */
     public function isRolledBack(): bool
     {
-        return $this->status === 'rolled_back';
+        return $this->status === MigrationStatus::RolledBack;
     }
 }

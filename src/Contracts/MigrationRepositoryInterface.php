@@ -59,6 +59,14 @@ interface MigrationRepositoryInterface
     public function getRollbackableByBatch(int $batch): Collection;
 
     /**
+     * Get the records left without a known outcome: failed, or still running
+     * after the process died.
+     *
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getUnresolved(): Collection;
+
+    /**
      * Log that a migration is starting.
      *
      * @param string $migration
@@ -139,12 +147,4 @@ interface MigrationRepositoryInterface
      * @return bool
      */
     public function repositoryExists(): bool;
-
-    /**
-     * Set the connection to use.
-     *
-     * @param string|null $connection
-     * @return static
-     */
-    public function setConnection(?string $connection): static;
 }

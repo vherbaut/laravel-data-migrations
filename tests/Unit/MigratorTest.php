@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
+use Vherbaut\DataMigrations\Exceptions\UnresolvedMigrationsException;
 use Vherbaut\DataMigrations\Migration\Migrator;
 
 beforeEach(function (): void {
@@ -218,4 +219,87 @@ it('returns no orphaned migrations when every record has a file', function (): v
 
 it('returns no orphaned migrations when the table is empty', function (): void {
     expect($this->migrator->getOrphanedMigrations())->toBeEmpty();
+});
+
+it('refuses to run while a failed migration is unresolved', function (): void {
+    $failed = $this->createTestMigration('failed_before', dataMigrationContent('$this->affected(1);'));
+    $pending = $this->createTestMigration('pending_after', dataMigrationContent('$this->affected(1);'));
+    insertDataMigrationRecord($this->migrator->getMigrationName($failed), 1, 'failed');
+
+    expect(fn () => $this->migrator->run())->toThrow(UnresolvedMigrationsException::class, $this->migrator->getMigrationName($failed))
+        ->and(DB::table('data_migrations')->where('migration', $this->migrator->getMigrationName($pending))->exists())->toBeFalse()
+        ->and(DB::table('data_migrations')->where('migration', $this->migrator->getMigrationName($failed))->value('status'))->toBe('failed');
+});
+
+it('refuses to run while a running record is unresolved', function (): void {
+    $running = $this->createTestMigration('running_before', dataMigrationContent('$this->affected(1);'));
+    insertDataMigrationRecord($this->migrator->getMigrationName($running), 1, 'running');
+
+    expect(fn () => $this->migrator->run())->toThrow(UnresolvedMigrationsException::class);
+});
+
+it('exposes the unresolved migrations on the exception', function (): void {
+    $failed = $this->createTestMigration('listed_failed', dataMigrationContent());
+    insertDataMigrationRecord($this->migrator->getMigrationName($failed), 1, 'failed');
+
+    try {
+        $this->migrator->run();
+    } catch (UnresolvedMigrationsException $exception) {
+        expect($exception->getMigrations())->toBe([$this->migrator->getMigrationName($failed)])
+            ->and($exception->getMessage())->toContain('--retry-failed');
+
+        return;
+    }
+
+    $this->fail('UnresolvedMigrationsException was not thrown.');
+});
+
+it('retries unresolved migrations with the retry-failed option', function (): void {
+    $failed = $this->createTestMigration('retried_failed', dataMigrationContent('$this->affected(1);'));
+    $running = $this->createTestMigration('retried_running', dataMigrationContent('$this->affected(2);'));
+    $pending = $this->createTestMigration('retried_pending', dataMigrationContent('$this->affected(3);'));
+    insertDataMigrationRecord($this->migrator->getMigrationName($failed), 1, 'failed');
+    insertDataMigrationRecord($this->migrator->getMigrationName($running), 2, 'running');
+
+    $ran = $this->migrator->run(['retry-failed' => true]);
+
+    expect($ran)->toBe([$failed, $pending, $running])
+        ->and(DB::table('data_migrations')->pluck('status')->unique()->all())->toBe(['completed'])
+        ->and(DB::table('data_migrations')->pluck('batch')->unique()->all())->toBe([3])
+        ->and(DB::table('data_migrations')->count())->toBe(3);
+});
+
+it('re-runs a failed idempotent migration without the option', function (): void {
+    $failed = $this->createTestMigration('idempotent_failed', dataMigrationContent('$this->affected(1);', 'protected bool $idempotent = true;'));
+    insertDataMigrationRecord($this->migrator->getMigrationName($failed), 1, 'failed');
+
+    $ran = $this->migrator->run();
+
+    expect($ran)->toBe([$failed])
+        ->and(DB::table('data_migrations')->value('status'))->toBe('completed');
+});
+
+it('re-runs a rolled back migration without the option', function (): void {
+    $rolledBack = $this->createTestMigration('rolled_back_again', dataMigrationContent('$this->affected(1);'));
+    insertDataMigrationRecord($this->migrator->getMigrationName($rolledBack), 1, 'rolled_back');
+
+    expect($this->migrator->run())->toBe([$rolledBack])
+        ->and(DB::table('data_migrations')->value('status'))->toBe('completed');
+});
+
+it('ignores an unresolved record whose file no longer exists', function (): void {
+    insertDataMigrationRecord('2024_01_01_000000_ghost', 1, 'failed');
+    $pending = $this->createTestMigration('after_ghost', dataMigrationContent('$this->affected(1);'));
+
+    expect($this->migrator->run())->toBe([$pending]);
+});
+
+it('lists idempotent but not other unresolved migrations as pending', function (): void {
+    $blocked = $this->createTestMigration('blocked_failed', dataMigrationContent());
+    $idempotent = $this->createTestMigration('idempotent_running', dataMigrationContent('', 'protected bool $idempotent = true;'));
+    $pending = $this->createTestMigration('plain_pending', dataMigrationContent());
+    insertDataMigrationRecord($this->migrator->getMigrationName($blocked), 1, 'failed');
+    insertDataMigrationRecord($this->migrator->getMigrationName($idempotent), 1, 'running');
+
+    expect($this->migrator->getPendingMigrations())->toBe([$idempotent, $pending]);
 });

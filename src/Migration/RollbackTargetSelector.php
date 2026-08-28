@@ -21,13 +21,18 @@ class RollbackTargetSelector
     ) {}
 
     /**
-     * Select the records to roll back: a given batch, the last N migrations, or the last batch.
+     * Select the records to roll back: every completed migration, a given batch,
+     * the last N migrations, or the last batch.
      *
      * @param array<string, mixed> $options
      * @return Collection<int, MigrationRecord>
      */
     public function select(array $options): Collection
     {
+        if ((bool) ($options['all'] ?? false)) {
+            return $this->repository->getRollbackable();
+        }
+
         if (isset($options['batch'])) {
             return $this->repository->getRollbackableByBatch((int) $options['batch']);
         }

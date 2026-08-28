@@ -4,6 +4,7 @@ includes:
 parameters:
     paths:
         - src
+        - database
     level: 6
     parallel:
         maximumNumberOfProcesses: 1

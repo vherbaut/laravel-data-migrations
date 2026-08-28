@@ -11,19 +11,13 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
+use Vherbaut\DataMigrations\Enums\MigrationStatus;
 
 /**
  * Repository for tracking data migration execution state.
  */
 class MigrationRepository implements MigrationRepositoryInterface
 {
-    /**
-     * Statuses of migrations that can be rolled back.
-     *
-     * @var array<int, string>
-     */
-    protected const ROLLBACKABLE_STATUSES = ['completed', 'running'];
-
     /**
      * The database connection resolver.
      *
@@ -50,11 +44,13 @@ class MigrationRepository implements MigrationRepositoryInterface
      *
      * @param ConnectionResolverInterface $resolver
      * @param string $table
+     * @param string|null $connection
      */
-    public function __construct(ConnectionResolverInterface $resolver, string $table)
+    public function __construct(ConnectionResolverInterface $resolver, string $table, ?string $connection = null)
     {
         $this->resolver = $resolver;
         $this->table = $table;
+        $this->connection = $connection;
     }
 
     /**
@@ -65,7 +61,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     public function getRan(): array
     {
         return $this->table()
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->orderBy('batch')
             ->orderBy('migration')
             ->pluck('migration')
@@ -101,7 +97,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     public function getLast(): Collection
     {
         $lastBatch = $this->table()
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->max('batch');
 
         if ($lastBatch === null) {
@@ -110,7 +106,7 @@ class MigrationRepository implements MigrationRepositoryInterface
 
         return $this->table()
             ->where('batch', $lastBatch)
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->orderByDesc('migration')
             ->get()
             ->map(
@@ -144,7 +140,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     public function getRollbackable(?int $steps = null): Collection
     {
         $query = $this->table()
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->orderByDesc('batch')
             ->orderByDesc('migration');
 
@@ -167,8 +163,26 @@ class MigrationRepository implements MigrationRepositoryInterface
     {
         return $this->table()
             ->where('batch', $batch)
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->orderByDesc('migration')
+            ->get()
+            ->map(
+                fn (object $record): MigrationRecord => MigrationRecord::fromDatabaseRecord($record)
+            );
+    }
+
+    /**
+     * Get the records left without a known outcome: failed, or still running
+     * after the process died.
+     *
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getUnresolved(): Collection
+    {
+        return $this->table()
+            ->whereIn('status', [MigrationStatus::Failed->value, MigrationStatus::Running->value])
+            ->orderBy('batch')
+            ->orderBy('migration')
             ->get()
             ->map(
                 fn (object $record): MigrationRecord => MigrationRecord::fromDatabaseRecord($record)
@@ -184,15 +198,12 @@ class MigrationRepository implements MigrationRepositoryInterface
      */
     public function logStart(string $migration, int $batch): void
     {
-        $this->table()
-            ->where('migration', $migration)
-            ->whereIn('status', ['failed', 'rolled_back'])
-            ->delete();
+        $this->delete($migration);
 
         $this->table()->insert([
             'migration' => $migration,
             'batch' => $batch,
-            'status' => 'running',
+            'status' => MigrationStatus::Running->value,
             'started_at' => now(),
             'created_at' => now(),
             'updated_at' => now(),
@@ -213,7 +224,7 @@ class MigrationRepository implements MigrationRepositoryInterface
         $this->table()
             ->where('migration', $migration)
             ->update([
-                'status' => 'completed',
+                'status' => MigrationStatus::Completed->value,
                 'rows_affected' => $rowsAffected,
                 'duration_ms' => $durationMs,
                 'metadata' => json_encode($metadata),
@@ -235,7 +246,7 @@ class MigrationRepository implements MigrationRepositoryInterface
         $this->table()
             ->where('migration', $migration)
             ->update([
-                'status' => 'failed',
+                'status' => MigrationStatus::Failed->value,
                 'error_message' => $errorMessage,
                 'updated_at' => now(),
             ]);
@@ -252,7 +263,7 @@ class MigrationRepository implements MigrationRepositoryInterface
         $this->table()
             ->where('migration', $migration)
             ->update([
-                'status' => 'rolled_back',
+                'status' => MigrationStatus::RolledBack->value,
                 'updated_at' => now(),
             ]);
     }
@@ -320,7 +331,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     {
         return $this->table()
             ->where('migration', $migration)
-            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->where('status', MigrationStatus::Completed->value)
             ->exists();
     }
 
@@ -355,18 +366,5 @@ class MigrationRepository implements MigrationRepositoryInterface
         $connection = $this->resolver->connection($this->connection);
 
         return $connection;
-    }
-
-    /**
-     * Set the connection to use.
-     *
-     * @param string|null $connection
-     * @return static
-     */
-    public function setConnection(?string $connection): static
-    {
-        $this->connection = $connection;
-
-        return $this;
     }
 }

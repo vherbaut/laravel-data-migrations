@@ -26,6 +26,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Tracking Table Connection
+    |--------------------------------------------------------------------------
+    |
+    | The database connection holding the tracking table. Null uses the
+    | default connection. Each migration keeps its own $connection property
+    | for the data it transforms.
+    |
+    */
+    'connection' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Transaction Mode
     |--------------------------------------------------------------------------
     |
@@ -75,7 +87,7 @@ return [
     | Concurrency Lock
     |--------------------------------------------------------------------------
     |
-    | data:migrate, data:rollback and data:fresh share a single cache lock
+    | data:migrate, data:rollback and data:refresh share a single cache lock
     | when run with --isolated. Set "enabled" to true to take the lock even
     | without the option. "store" names the cache store holding the lock
     | (null uses the default store) and "ttl" is the number of seconds after

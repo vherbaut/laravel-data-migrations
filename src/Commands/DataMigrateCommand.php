@@ -32,6 +32,7 @@ class DataMigrateCommand extends Command implements Isolatable
                             {--force : Force the operation to run in production}
                             {--step : Force the migrations to be run so they can be rolled back individually}
                             {--no-confirm : Skip row count confirmation}
+                        {--retry-failed : Run again the migrations recorded as failed, or still running after a crash}
                             {--path=* : The path(s) to the data migration files to use}
                             {--realpath : Indicate any provided migration file paths are pre-resolved absolute paths}';
 
@@ -92,6 +93,7 @@ class DataMigrateCommand extends Command implements Isolatable
         $options = [
             'dry-run' => (bool) $this->option('dry-run'),
             'step' => (bool) $this->option('step'),
+            'retry-failed' => (bool) $this->option('retry-failed'),
         ];
 
         if ($options['dry-run']) {

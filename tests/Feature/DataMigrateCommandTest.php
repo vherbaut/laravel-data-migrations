@@ -90,7 +90,7 @@ it('proceeds in production with force flag', function (): void {
         ->assertSuccessful();
 });
 
-it('can retry a failed migration', function (): void {
+it('refuses a failed migration until --retry-failed is passed', function (): void {
     $content = <<<'PHP'
 <?php
 
@@ -126,8 +126,16 @@ PHP;
         'status' => 'failed',
     ]);
 
-    // Running migrate again should retry the failed migration
     $this->artisan('data:migrate')
+        ->expectsOutputToContain("{$migrationName}. Check that no other process is running them, then pass --retry-failed")
+        ->assertFailed();
+
+    $this->assertDatabaseHas('data_migrations', [
+        'migration' => $migrationName,
+        'status' => 'failed',
+    ]);
+
+    $this->artisan('data:migrate', ['--retry-failed' => true])
         ->expectsOutputToContain('Migrating:')
         ->expectsOutputToContain('Migrated:')
         ->assertSuccessful();
@@ -137,7 +145,6 @@ PHP;
         'status' => 'completed',
     ]);
 
-    // Should only have one record for this migration
     $count = DB::table('data_migrations')
         ->where('migration', $migrationName)
         ->count();

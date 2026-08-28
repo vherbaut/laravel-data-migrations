@@ -5,24 +5,25 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\DTO;
 
 use DateTimeInterface;
+use Vherbaut\DataMigrations\Enums\MigrationStatus;
 
 /**
- * Status of one data migration as reported by data:status, whether it comes from a file, a record or both.
+ * One row of data:status, for a migration file or an orphaned record.
  */
-final readonly class MigrationStatus
+final readonly class MigrationStatusEntry
 {
     /**
      * @param string $name
-     * @param string $status
+     * @param MigrationStatus $status
      * @param int|null $batch
      * @param int|null $rowsAffected
      * @param int|null $durationMs
      * @param DateTimeInterface|null $ranAt
-     * @param bool $orphaned True when a tracking record exists but its migration file is gone.
+     * @param bool $orphaned
      */
     public function __construct(
         public string $name,
-        public string $status,
+        public MigrationStatus $status,
         public ?int $batch,
         public ?int $rowsAffected,
         public ?int $durationMs,
@@ -31,18 +32,18 @@ final readonly class MigrationStatus
     ) {}
 
     /**
-     * Build the status of a migration file that has no tracking record yet.
+     * Create the entry of a migration file without tracking record.
      *
      * @param string $name
      * @return self
      */
     public static function pending(string $name): self
     {
-        return new self($name, 'pending', null, null, null, null, false);
+        return new self($name, MigrationStatus::Pending, null, null, null, null, false);
     }
 
     /**
-     * Build the status of a tracked migration.
+     * Create the entry of a tracking record.
      *
      * @param MigrationRecord $record
      * @param bool $orphaned
@@ -66,11 +67,11 @@ final readonly class MigrationStatus
      */
     public function isPending(): bool
     {
-        return $this->status === 'pending';
+        return $this->status === MigrationStatus::Pending;
     }
 
     /**
-     * Get the JSON representation used by data:status --json.
+     * The JSON shape printed by data:status --json.
      *
      * @return array{
      *     name: string,
@@ -86,7 +87,7 @@ final readonly class MigrationStatus
     {
         return [
             'name' => $this->name,
-            'status' => $this->status,
+            'status' => $this->status->value,
             'batch' => $this->batch,
             'rows_affected' => $this->rowsAffected,
             'duration_ms' => $this->durationMs,

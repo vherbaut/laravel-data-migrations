@@ -9,8 +9,8 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Backup\BackupServiceProvider;
 use Vherbaut\DataMigrations\Commands\DataMigrateCommand;
-use Vherbaut\DataMigrations\Commands\DataMigrateFreshCommand;
 use Vherbaut\DataMigrations\Commands\DataMigratePruneCommand;
+use Vherbaut\DataMigrations\Commands\DataMigrateRefreshCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateRollbackCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateStatusCommand;
 use Vherbaut\DataMigrations\Commands\MakeDataMigrationCommand;
@@ -19,7 +19,6 @@ use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Listeners\RunDataMigrationsAfterMigrate;
-use Vherbaut\DataMigrations\Locking\DataMigrationsCommandMutex;
 use Vherbaut\DataMigrations\Migration\MigrationFileResolver;
 use Vherbaut\DataMigrations\Migration\MigrationRepository;
 use Vherbaut\DataMigrations\Migration\Migrator;
@@ -44,7 +43,6 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->registerFileResolver();
         $this->registerBackupService();
         $this->registerMigrator();
-        $this->registerCommandMutex();
     }
 
     /**
@@ -57,11 +55,10 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->app->singleton(MigrationRepositoryInterface::class, function (Application $app): MigrationRepository {
             /** @var string $table */
             $table = config('data-migrations.table');
+            /** @var string|null $connection */
+            $connection = config('data-migrations.connection');
 
-            return new MigrationRepository(
-                $app['db'],
-                $table
-            );
+            return new MigrationRepository($app['db'], $table, $connection);
         });
 
         $this->app->alias(MigrationRepositoryInterface::class, MigrationRepository::class);
@@ -126,19 +123,6 @@ class DataMigrationsServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the mutex shared by the data migration commands.
-     *
-     * The mutex must be a singleton: it counts how many nested commands hold
-     * the lock in the current process.
-     *
-     * @return void
-     */
-    protected function registerCommandMutex(): void
-    {
-        $this->app->singleton(DataMigrationsCommandMutex::class);
-    }
-
-    /**
      * Bootstrap any application services.
      *
      * @return void
@@ -179,6 +163,10 @@ class DataMigrationsServiceProvider extends ServiceProvider
             ], 'data-migrations-migrations');
 
             $this->publishes([
+                __DIR__.'/../database/upgrades/' => database_path('migrations'),
+            ], 'data-migrations-upgrade');
+
+            $this->publishes([
                 __DIR__.'/../stubs/' => base_path('stubs'),
             ], 'data-migrations-stubs');
         }
@@ -197,7 +185,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
                 DataMigrateCommand::class,
                 DataMigrateRollbackCommand::class,
                 DataMigrateStatusCommand::class,
-                DataMigrateFreshCommand::class,
+                DataMigrateRefreshCommand::class,
                 DataMigratePruneCommand::class,
             ]);
         }

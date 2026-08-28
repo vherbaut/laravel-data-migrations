@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
+use Vherbaut\DataMigrations\Enums\MigrationStatus;
 
 it('creates a migration record from database object', function (): void {
     $record = (object) [
@@ -25,7 +26,7 @@ it('creates a migration record from database object', function (): void {
     expect($migrationRecord->id)->toBe(1)
         ->and($migrationRecord->migration)->toBe('2024_01_01_000000_test_migration')
         ->and($migrationRecord->batch)->toBe(1)
-        ->and($migrationRecord->status)->toBe('completed')
+        ->and($migrationRecord->status)->toBe(MigrationStatus::Completed)
         ->and($migrationRecord->rowsAffected)->toBe(100)
         ->and($migrationRecord->durationMs)->toBe(500)
         ->and($migrationRecord->errorMessage)->toBeNull()

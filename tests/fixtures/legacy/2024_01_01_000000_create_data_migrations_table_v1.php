@@ -6,30 +6,17 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * The connection holding the tracking table (null = default connection).
-     *
-     * @return string|null
-     */
-    public function getConnection(): ?string
-    {
-        /** @var string|null $connection */
-        $connection = config('data-migrations.connection');
-
-        return $connection;
-    }
-
     public function up(): void
     {
         $tableName = config('data-migrations.table', 'data_migrations');
 
-        Schema::connection($this->getConnection())->create($tableName, function (Blueprint $table) {
+        Schema::create($tableName, function (Blueprint $table) {
             $table->id();
             $table->string('migration');
             $table->integer('batch');
-            $table->string('status', 20);
-            $table->unsignedBigInteger('rows_affected')->nullable();
-            $table->unsignedBigInteger('duration_ms')->nullable();
+            $table->enum('status', ['pending', 'running', 'completed', 'failed', 'rolled_back'])->default('pending');
+            $table->unsignedInteger('rows_affected')->nullable();
+            $table->unsignedInteger('duration_ms')->nullable();
             $table->text('error_message')->nullable();
             $table->json('metadata')->nullable();
             $table->timestamp('started_at')->nullable();
@@ -38,13 +25,12 @@ return new class extends Migration
 
             $table->unique('migration');
             $table->index(['batch', 'status']);
-            $table->index('status');
         });
     }
 
     public function down(): void
     {
         $tableName = config('data-migrations.table', 'data_migrations');
-        Schema::connection($this->getConnection())->dropIfExists($tableName);
+        Schema::dropIfExists($tableName);
     }
 };

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Foundation\Application;
+use Illuminate\Support\ServiceProvider;
 use Vherbaut\DataMigrations\DataMigrationsServiceProvider;
 
 beforeEach(function (): void {
@@ -79,4 +80,21 @@ it('does not create the data migrations directory outside the console', function
     makeServiceProviderSpy($app)->exposedEnsureMigrationPathExists();
 
     expect(is_dir($path))->toBeFalse();
+});
+
+it('publishes the upgrade migration under its own tag without loading it', function (): void {
+    $paths = ServiceProvider::pathsToPublish(DataMigrationsServiceProvider::class, 'data-migrations-upgrade');
+    $provider = makeServiceProviderSpy($this->app);
+
+    $provider->boot();
+
+    expect(array_map('realpath', array_keys($paths)))->toBe([realpath(__DIR__.'/../../database/upgrades')])
+        ->and(array_values($paths)[0])->toEndWith(DIRECTORY_SEPARATOR.'migrations')
+        ->and(array_map('realpath', $provider->loadedMigrationPaths))->toBe([realpath(__DIR__.'/../../database/migrations')]);
+});
+
+it('keeps the upgrade migration out of the migrations publish tag', function (): void {
+    $paths = ServiceProvider::pathsToPublish(DataMigrationsServiceProvider::class, 'data-migrations-migrations');
+
+    expect(array_map('realpath', array_keys($paths)))->toBe([realpath(__DIR__.'/../../database/migrations')]);
 });

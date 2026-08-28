@@ -13,12 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Vherbaut\DataMigrations\Contracts\Reversible` interface, carrying `down()`. `data:rollback` reverts a migration only when it implements this interface; a migration that declares `down()` without it is skipped with an explicit message
 - `InvalidMigrationException`, thrown by `MigrationFileResolver::resolve()` when a file neither returns a migration instance nor declares its migration class, and `MigrationNotFoundException::forFile()` for a missing file
 - `dryRun()['reversible']` reflects the `Reversible` interface
+- `Vherbaut\DataMigrations\Enums\MigrationStatus` string enum (`Pending`, `Running`, `Completed`, `Failed`, `RolledBack`), carried by `MigrationRecord::$status` and by the `data:status` entries
+- `--retry-failed` option on `data:migrate`, and `UnresolvedMigrationsException` (a `MigrationException`) thrown when migrations recorded as failed, or still running after a crash, block a run
+- `data:refresh` command: rolls back every completed migration implementing `Reversible`, then runs the pending migrations
+- `connection` config key for the tracking table, passed to `MigrationRepository` as third constructor argument
+- `MigrationRepositoryInterface::getUnresolved()`
+- Upgrade migration for 1.x tracking tables in `database/upgrades/`, published with `php artisan vendor:publish --tag=data-migrations-upgrade`
+- PHPStan analyses the `database/` directory
 
 ### Changed
 
 - `MigrationFileResolver::resolve()` includes a migration file once. A named migration class is instantiated only when it is declared in the file itself, so an application class sharing the name is never mistaken for the migration
 - `chunk()`, `chunkLazy()` and `chunkUpdate()` add the rows they process to the affected row count. The chunked stub no longer calls `affected($processed)` after `chunk()`
 - The stubs document how to implement `Reversible`
+- Tracking table: `status` is a `string(20)` without default instead of an enum, `rows_affected` and `duration_ms` are unsigned big integers, and `status` is indexed. Existing installs run the upgrade migration (see UPGRADING.md)
+- `data:migrate` refuses to run while a non idempotent migration is recorded as `failed` or `running` (exit code 1) until `--retry-failed` is passed; `$idempotent` migrations are retried automatically; `rolled_back` migrations run again as before
+- `running` records are no longer rollbackable, `getRan()` and `hasRun()` only consider `completed` records, and `logStart()` replaces any previous record of the migration
+- `RollbackTargetSelector::select()` accepts an `all` option selecting every completed migration
+- `DataMigrationsCommandMutex` no longer counts nested commands: `data:refresh` runs the rollback and the migrations in one process
 - Minimum requirements are PHP 8.2 and Laravel 12; Laravel 13 is supported. The CI matrix covers PHP 8.2 to 8.5 on Laravel 12 and 13 and no longer needs the Composer security advisory exemption that end-of-life releases required
 - PHPStan runs at level 6
 
@@ -27,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Laravel 10 and 11 support
 - `MigrationInterface::down()`, `MigrationInterface::isReversible()` and the empty `DataMigration::down()`, replaced by the `Reversible` interface
 - The `chunk_size` config key, which no code ever read. Set `$chunkSize` on the migration instead
+- `data:fresh`, replaced by `data:refresh`. Truncate the tracking table yourself to run every migration again
+- `MigrationRepositoryInterface::setConnection()`, replaced by the constructor argument
+- The `Vherbaut\DataMigrations\DTO\MigrationStatus` class, renamed `MigrationStatusEntry`
 - The execution timeout: `$timeout` property, `MigrationInterface::getTimeout()`, `timeout` config key and `TimeoutException`. It relied on `set_time_limit()`, which ignores time spent in database queries, so it never bounded a migration. See UPGRADING.md
 
 ## [1.2.0] - 2026-08-28

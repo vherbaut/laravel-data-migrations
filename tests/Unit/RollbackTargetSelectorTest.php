@@ -43,3 +43,14 @@ it('selects nothing when there is nothing to roll back', function (): void {
         ->and($this->selector->select(['batch' => 1]))->toBeEmpty()
         ->and($this->selector->select(['step' => 3]))->toBeEmpty();
 });
+
+it('selects every completed record with the all option', function (): void {
+    insertDataMigrationRecord('a_completed', 1, 'completed');
+    insertDataMigrationRecord('b_completed', 2, 'completed');
+    insertDataMigrationRecord('c_failed', 2, 'failed');
+    insertDataMigrationRecord('d_rolled_back', 3, 'rolled_back');
+    insertDataMigrationRecord('e_running', 4, 'running');
+
+    expect($this->selector->select(['all' => true])->pluck('migration')->all())->toBe(['b_completed', 'a_completed'])
+        ->and($this->selector->select(['all' => true, 'batch' => 1, 'step' => 1])->pluck('migration')->all())->toBe(['b_completed', 'a_completed']);
+});

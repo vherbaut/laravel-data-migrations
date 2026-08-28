@@ -9,6 +9,7 @@ use PHPUnit\Framework\Assert;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Enums\MigrationStatus;
 use Vherbaut\DataMigrations\Exceptions\MigrationNotFoundException;
 
 /**
@@ -69,7 +70,7 @@ trait InteractsWithDataMigrations
 
         if (! $record->isCompleted()) {
             if (! $record->isRunning()) {
-                throw new LogicException("The data migration [{$name}] cannot be rolled back from status [{$record->status}].");
+                throw new LogicException("The data migration [{$name}] cannot be rolled back from status [{$record->status->value}].");
             }
         }
 
@@ -86,7 +87,7 @@ trait InteractsWithDataMigrations
      */
     protected function assertDataMigrationRan(string $name): void
     {
-        Assert::assertSame('completed', $this->dataMigrationStatus($name), "The data migration [{$name}] did not complete.");
+        Assert::assertSame(MigrationStatus::Completed, $this->dataMigrationStatus($name), "The data migration [{$name}] did not complete.");
     }
 
     /**
@@ -95,7 +96,7 @@ trait InteractsWithDataMigrations
      */
     protected function assertDataMigrationNotRan(string $name): void
     {
-        Assert::assertNotContains($this->dataMigrationStatus($name), ['completed', 'running'], "The data migration [{$name}] ran.");
+        Assert::assertNotContains($this->dataMigrationStatus($name), [MigrationStatus::Completed, MigrationStatus::Running], "The data migration [{$name}] ran.");
     }
 
     /**
@@ -104,7 +105,7 @@ trait InteractsWithDataMigrations
      */
     protected function assertDataMigrationFailed(string $name): void
     {
-        Assert::assertSame('failed', $this->dataMigrationStatus($name), "The data migration [{$name}] did not fail.");
+        Assert::assertSame(MigrationStatus::Failed, $this->dataMigrationStatus($name), "The data migration [{$name}] did not fail.");
     }
 
     /**
@@ -113,14 +114,14 @@ trait InteractsWithDataMigrations
      */
     protected function assertDataMigrationRolledBack(string $name): void
     {
-        Assert::assertSame('rolled_back', $this->dataMigrationStatus($name), "The data migration [{$name}] was not rolled back.");
+        Assert::assertSame(MigrationStatus::RolledBack, $this->dataMigrationStatus($name), "The data migration [{$name}] was not rolled back.");
     }
 
     /**
      * @param string $name
-     * @return string|null
+     * @return MigrationStatus|null
      */
-    protected function dataMigrationStatus(string $name): ?string
+    protected function dataMigrationStatus(string $name): ?MigrationStatus
     {
         return app(MigrationRepositoryInterface::class)->getMigration($name)?->status;
     }

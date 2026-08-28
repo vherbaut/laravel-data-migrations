@@ -156,9 +156,9 @@ class FixUserEmailsSeeder extends Seeder
 | **Support des transactions** | Encapsulation automatique avec modes configurables |
 | **Sauvegarde auto** | Sauvegarde automatique optionnelle (nécessite [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
 | **Événements** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` et `NoPendingDataMigrations` pour les notifications et l'audit |
-| **Verrou de concurrence** | Option `--isolated` et verrou de cache partagé entre `data:migrate`, `data:rollback` et `data:fresh` |
+| **Verrou de concurrence** | Option `--isolated` et verrou de cache partagé entre `data:migrate`, `data:rollback` et `data:refresh` |
 | **Alertes de seuil** | Demandes de confirmation pour les opérations volumineuses |
-| **PHPStan Niveau 5** | Entièrement typé, conformité stricte à l'analyse statique |
+| **PHPStan Niveau 6** | Entièrement typé, conformité stricte à l'analyse statique |
 | **Helpers de test** | Trait `InteractsWithDataMigrations` et `DataMigrations::fake()` pour votre suite de tests |
 | **Enchaînement** | Option `run_after_migrate` pour lancer `data:migrate` après `php artisan migrate` |
 
@@ -307,7 +307,7 @@ Total : 2 | En attente : 1 | Terminées : 1 | Échouées : 0
 | `data:migrate` | Exécuter toutes les migrations de données en attente |
 | `data:rollback` | Annuler le dernier lot de migrations |
 | `data:status` | Afficher le statut de toutes les migrations |
-| `data:fresh` | Réinitialiser et ré-exécuter toutes les migrations |
+| `data:refresh` | Annuler toutes les migrations puis les ré-exécuter |
 | `data:prune` | Supprimer les enregistrements de suivi dont le fichier de migration n'existe plus |
 
 ### make:data-migration
@@ -353,13 +353,14 @@ php artisan data:migrate [options]
 | `--force` | Forcer l'exécution en environnement de production |
 | `--step` | Attribuer un numéro de lot distinct à chaque migration afin de pouvoir les annuler une par une |
 | `--no-confirm` | Ignorer les demandes de confirmation du nombre de lignes |
+| `--retry-failed` | Ré-exécuter les migrations enregistrées comme échouées, ou encore en cours après un plantage (voir ci-dessous) |
 | `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
 | `--path=*` | N'utiliser que les migrations de données trouvées dans ces répertoires (répétable, relatif au chemin de base sauf avec `--realpath`) |
 | `--realpath` | Considérer les valeurs de `--path` comme des chemins absolus |
 
-#### Rejouer les migrations échouées ou annulées
+#### Migrations échouées, en cours ou annulées
 
-Les migrations enregistrées comme `failed` ou `rolled_back` sont considérées comme en attente : le prochain `data:migrate` les ré-exécute et remplace l'enregistrement précédent. `data:rollback` ne cible que les migrations `completed` (ou encore `running`).
+Une migration enregistrée comme `rolled_back` redevient en attente : le prochain `data:migrate` l'exécute et remplace l'enregistrement précédent. Une migration enregistrée comme `failed`, ou encore `running` après la mort de son processus, bloque `data:migrate` (code de sortie 1, liste des migrations) tant que vous ne passez pas `--retry-failed`, qui les ré-exécute dans l'ordre des fichiers avec celles en attente. Une migration déclarant `$idempotent = true` est rejouée sans l'option. `data:rollback` ne cible que les migrations `completed`.
 
 ### data:rollback
 
@@ -407,12 +408,12 @@ php artisan data:status [options]
 
 Les enregistrements dont le fichier de migration a été supprimé sont listés aussi, marqués `(orphaned)` dans la table et comptés dans la ligne de résumé. Supprimez-les avec `data:prune`.
 
-### data:fresh
+### data:refresh
 
-Réinitialiser et ré-exécuter toutes les migrations de données.
+Annuler toutes les migrations terminées qui implémentent `Reversible`, puis ré-exécuter les migrations en attente.
 
 ```bash
-php artisan data:fresh [options]
+php artisan data:refresh [options]
 ```
 
 | Option | Description |
@@ -420,7 +421,7 @@ php artisan data:fresh [options]
 | `--force` | Forcer l'exécution en environnement de production |
 | `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
 
-> **Attention :** Cette commande supprimera tous les enregistrements de migration et ré-exécutera chaque migration. À utiliser avec précaution.
+> **Note :** Les migrations qui n'implémentent pas `Reversible` sont ignorées et conservent leur enregistrement `completed`. La commande refuse de s'exécuter tant qu'une migration est `failed` ou `running` : résolvez-la d'abord avec `data:migrate --retry-failed`.
 
 ### data:prune
 
@@ -733,6 +734,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Connexion de la table de suivi
+    |--------------------------------------------------------------------------
+    |
+    | La connexion de base de données qui héberge la table de suivi (null = défaut).
+    |
+    */
+    'connection' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Mode de transaction
     |--------------------------------------------------------------------------
     |
@@ -869,7 +880,7 @@ composer require spatie/laravel-backup
 
 ### Verrou de concurrence
 
-Deux processus `data:migrate` lancés en même temps tenteraient tous deux d'insérer le même enregistrement de suivi. Passez `--isolated` à `data:migrate`, `data:rollback` ou `data:fresh` pour prendre d'abord un verrou de cache, exactement comme `php artisan migrate --isolated` :
+Deux processus `data:migrate` lancés en même temps tenteraient tous deux d'insérer le même enregistrement de suivi. Passez `--isolated` à `data:migrate`, `data:rollback` ou `data:refresh` pour prendre d'abord un verrou de cache, exactement comme `php artisan migrate --isolated` :
 
 ```bash
 # Ignore l'exécution (code de sortie 0) quand une autre commande de migration de données détient le verrou
@@ -879,7 +890,7 @@ php artisan data:migrate --isolated
 php artisan data:migrate --isolated=12
 ```
 
-Les trois commandes partagent un seul verrou nommé `data-migrations` : `data:rollback --isolated` attend donc aussi la fin d'un `data:migrate --isolated` en cours. `data:fresh --isolated` conserve le verrou pendant qu'il exécute `data:migrate` en interne. Le verrou vit dans le store de cache indiqué par `lock.store` (le store par défaut si `null`) et expire après `lock.ttl` secondes si le processus est tué. Mettez `lock.enabled` à `true` pour prendre le verrou sans passer l'option :
+Les trois commandes partagent un seul verrou nommé `data-migrations` : `data:rollback --isolated` attend donc aussi la fin d'un `data:migrate --isolated` en cours. Le verrou vit dans le store de cache indiqué par `lock.store` (le store par défaut si `null`) et expire après `lock.ttl` secondes si le processus est tué. Mettez `lock.enabled` à `true` pour prendre le verrou sans passer l'option :
 
 ```php
 // config/data-migrations.php
@@ -1147,8 +1158,8 @@ src/
 │   ├── Concerns/
 │   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
-│   ├── DataMigrateFreshCommand.php
 │   ├── DataMigratePruneCommand.php
+│   ├── DataMigrateRefreshCommand.php
 │   ├── DataMigrateRollbackCommand.php
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
@@ -1157,11 +1168,14 @@ src/
 ├── Contracts/                   # Interfaces
 ├── DTO/
 │   ├── MigrationRecord.php      # Objet de transfert de données typé
-│   └── MigrationStatus.php      # Ligne de data:status, forme JSON
+│   └── MigrationStatusEntry.php # Ligne de data:status, forme JSON
+├── Enums/
+│   └── MigrationStatus.php      # Statut d'un enregistrement de suivi
 ├── Exceptions/
 │   ├── InvalidMigrationException.php
 │   ├── MigrationException.php
-│   └── MigrationNotFoundException.php
+│   ├── MigrationNotFoundException.php
+│   └── UnresolvedMigrationsException.php
 ├── Events/
 │   ├── DataMigrationEnded.php
 │   ├── DataMigrationFailed.php
