@@ -24,6 +24,7 @@
 - [Writing Data Migrations](#writing-data-migrations)
 - [Configuration](#configuration)
 - [Safety Features](#safety-features)
+- [Events](#events)
 - [Real-World Examples](#real-world-examples)
 - [Architecture](#architecture)
 - [Testing](#testing)
@@ -155,6 +156,8 @@ class FixUserEmailsSeeder extends Seeder
 | **Transaction Support** | Automatic transaction wrapping with configurable modes |
 | **Auto Backup** | Optional automatic backup before migrations (requires [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
 | **Timeout Control** | Configurable execution time limits |
+| **Events** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations` for notifications and audit |
+| **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:fresh` |
 | **Row Threshold Alerts** | Confirmation prompts for large operations |
 | **PHPStan Level 5** | Fully typed, strict static analysis compliance |
 
@@ -345,6 +348,7 @@ php artisan data:migrate [options]
 | `--force` | Force execution in production environment |
 | `--step` | Assign a separate batch number to each migration so they can be rolled back individually |
 | `--no-confirm` | Skip row count confirmation prompts |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 
 #### Retrying failed or rolled back migrations
 
@@ -363,6 +367,7 @@ php artisan data:rollback [options]
 | `--step=N` | Rollback the last N migrations |
 | `--batch=N` | Rollback a specific batch number |
 | `--force` | Force execution in production environment |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 
 **Examples:**
 
@@ -401,6 +406,7 @@ php artisan data:fresh [options]
 | Option | Description |
 |--------|-------------|
 | `--force` | Force execution in production environment |
+| `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
 
 > **Warning:** This command will delete all migration records and re-run every migration. Use with caution.
 
@@ -775,6 +781,28 @@ return [
         */
         'auto_backup' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Concurrency Lock
+    |--------------------------------------------------------------------------
+    */
+    'lock' => [
+        /*
+        | Take the shared lock even when --isolated is not passed.
+        */
+        'enabled' => false,
+
+        /*
+        | Cache store holding the lock (null = default store).
+        */
+        'store' => null,
+
+        /*
+        | Seconds after which a lock left behind by a killed process expires.
+        */
+        'ttl' => 3600,
+    ],
 ];
 ```
 
@@ -836,6 +864,58 @@ Prevent runaway migrations with timeout limits:
 // Or per-migration
 protected ?int $timeout = 600; // 10 minutes for this migration
 ```
+
+### Concurrency Lock
+
+Two `data:migrate` processes started at the same time would both try to insert the same tracking record. Pass `--isolated` to `data:migrate`, `data:rollback` or `data:fresh` to take a cache lock first, exactly like `php artisan migrate --isolated`:
+
+```bash
+# Skips the run (exit code 0) when another data migration command holds the lock
+php artisan data:migrate --isolated
+
+# Same, but exits with code 12 instead of 0 when the lock is held
+php artisan data:migrate --isolated=12
+```
+
+The three commands share one lock named `data-migrations`, so `data:rollback --isolated` also waits for a running `data:migrate --isolated`. `data:fresh --isolated` keeps the lock while it runs `data:migrate` internally. The lock lives in the cache store given by `lock.store` (the default store when `null`) and expires after `lock.ttl` seconds if the process is killed. Set `lock.enabled` to `true` to take the lock without passing the option:
+
+```php
+// config/data-migrations.php
+'lock' => [
+    'enabled' => true,
+    'store' => 'redis',
+    'ttl' => 7200,
+],
+```
+
+---
+
+## Events
+
+The migrator dispatches Laravel events you can listen to for notifications, metrics or audit logs. Each event carries the migration instance, its name and the method being run (`$method`, either `up` or `down`), mirroring Laravel's own `MigrationStarted` and `MigrationEnded` events:
+
+| Event | Properties | When |
+|-------|------------|------|
+| `DataMigrationStarted` | `migration`, `name`, `method` | Right before `up()` or `down()` runs |
+| `DataMigrationEnded` | `migration`, `name`, `method`, `rowsAffected`, `durationMs` | After the tracking record was updated |
+| `DataMigrationFailed` | `migration`, `name`, `method`, `exception` | Before the exception is rethrown |
+| `NoPendingDataMigrations` | `method` | When a run or a rollback finds nothing to do |
+
+```php
+use Vherbaut\DataMigrations\Events\DataMigrationEnded;
+use Vherbaut\DataMigrations\Events\DataMigrationFailed;
+
+Event::listen(DataMigrationEnded::class, function (DataMigrationEnded $event) {
+    Log::info("Data migration {$event->name} ({$event->method}) affected {$event->rowsAffected} rows in {$event->durationMs}ms");
+});
+
+Event::listen(DataMigrationFailed::class, function (DataMigrationFailed $event) {
+    Notification::route('slack', config('services.slack.ops'))
+        ->notify(new DataMigrationFailedNotification($event->name, $event->exception));
+});
+```
+
+No event is dispatched during a dry run. The migrator receives the dispatcher when it is first resolved, so in tests call `Event::fake()` before the first Artisan call, or register a real listener with `Event::listen()`.
 
 ---
 
@@ -1061,6 +1141,8 @@ This package follows SOLID principles and uses clean architecture:
 ```
 src/
 ├── Commands/                    # Artisan commands
+│   ├── Concerns/
+│   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigrateFreshCommand.php
 │   ├── DataMigrateRollbackCommand.php
@@ -1075,8 +1157,15 @@ src/
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php
 │   └── TimeoutException.php
+├── Events/
+│   ├── DataMigrationEnded.php
+│   ├── DataMigrationFailed.php
+│   ├── DataMigrationStarted.php
+│   └── NoPendingDataMigrations.php
 ├── Facades/
 │   └── DataMigrations.php
+├── Locking/
+│   └── DataMigrationsCommandMutex.php
 ├── Migration/
 │   ├── DataMigration.php        # Base migration class
 │   ├── MigrationFileResolver.php

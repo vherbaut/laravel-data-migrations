@@ -6,16 +6,19 @@ namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Console\ConfirmableTrait;
+use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
+use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Exceptions\MigrationException;
 
 /**
  * Command to run pending data migrations.
  */
-class DataMigrateCommand extends Command
+class DataMigrateCommand extends Command implements Isolatable
 {
     use ConfirmableTrait;
+    use IsolatesDataMigrations;
 
     /**
      * The name and signature of the console command.

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- Events `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations`, dispatched by the migrator around `up()` and `down()` (never during a dry run). `Migrator` accepts an optional event dispatcher as fifth constructor argument
+- `--isolated[=CODE]` option on `data:migrate`, `data:rollback` and `data:fresh`, backed by a single cache lock shared by the three commands, with a new `lock` config block (`enabled`, `store`, `ttl`)
+- Tests covering `Migrator` (transaction modes, timeout, backup, dry run), the `MigrationRepository` logging methods and the `chunk*()` helpers
+- `.gitattributes` with `export-ignore` entries so that tests, CI and tooling files are left out of the distribution archive
+- `suggest` entry for `spatie/laravel-backup`, required by the `safety.auto_backup` option
+
+
 ## [1.1.2] - 2026-08-28
 
 ### Fixed
@@ -112,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clean separation of concerns
 - Typed DTOs (`MigrationRecord`)
 
-[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.1...HEAD
+[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.2...HEAD
+[1.1.2]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.3...1.1.0
 [1.0.3]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.2...1.0.3

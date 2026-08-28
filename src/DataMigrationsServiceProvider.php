@@ -16,6 +16,7 @@ use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Locking\DataMigrationsCommandMutex;
 use Vherbaut\DataMigrations\Migration\MigrationFileResolver;
 use Vherbaut\DataMigrations\Migration\MigrationRepository;
 use Vherbaut\DataMigrations\Migration\Migrator;
@@ -40,6 +41,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->registerFileResolver();
         $this->registerBackupService();
         $this->registerMigrator();
+        $this->registerCommandMutex();
     }
 
     /**
@@ -111,12 +113,26 @@ class DataMigrationsServiceProvider extends ServiceProvider
                 $app->make(MigrationRepositoryInterface::class),
                 $app['db'],
                 $app->make(MigrationFileResolverInterface::class),
-                $app->make(BackupServiceInterface::class)
+                $app->make(BackupServiceInterface::class),
+                $app['events']
             );
         });
 
         $this->app->alias(MigratorInterface::class, Migrator::class);
         $this->app->alias(MigratorInterface::class, 'data-migrator');
+    }
+
+    /**
+     * Register the mutex shared by the data migration commands.
+     *
+     * The mutex must be a singleton: it counts how many nested commands hold
+     * the lock in the current process.
+     *
+     * @return void
+     */
+    protected function registerCommandMutex(): void
+    {
+        $this->app->singleton(DataMigrationsCommandMutex::class);
     }
 
     /**

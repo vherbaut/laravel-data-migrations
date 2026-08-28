@@ -24,6 +24,7 @@
 - [Écrire des migrations de données](#écrire-des-migrations-de-données)
 - [Configuration](#configuration)
 - [Fonctionnalités de sécurité](#fonctionnalités-de-sécurité)
+- [Événements](#événements)
 - [Exemples concrets](#exemples-concrets)
 - [Architecture](#architecture)
 - [Tests](#tests)
@@ -155,6 +156,8 @@ class FixUserEmailsSeeder extends Seeder
 | **Support des transactions** | Encapsulation automatique avec modes configurables |
 | **Sauvegarde auto** | Sauvegarde automatique optionnelle (nécessite [spatie/laravel-backup](https://github.com/spatie/laravel-backup)) |
 | **Contrôle du timeout** | Limites de temps d'exécution configurables |
+| **Événements** | `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` et `NoPendingDataMigrations` pour les notifications et l'audit |
+| **Verrou de concurrence** | Option `--isolated` et verrou de cache partagé entre `data:migrate`, `data:rollback` et `data:fresh` |
 | **Alertes de seuil** | Demandes de confirmation pour les opérations volumineuses |
 | **PHPStan Niveau 5** | Entièrement typé, conformité stricte à l'analyse statique |
 
@@ -345,6 +348,7 @@ php artisan data:migrate [options]
 | `--force` | Forcer l'exécution en environnement de production |
 | `--step` | Attribuer un numéro de lot distinct à chaque migration afin de pouvoir les annuler une par une |
 | `--no-confirm` | Ignorer les demandes de confirmation du nombre de lignes |
+| `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
 
 #### Rejouer les migrations échouées ou annulées
 
@@ -363,6 +367,7 @@ php artisan data:rollback [options]
 | `--step=N` | Annuler les N dernières migrations |
 | `--batch=N` | Annuler un numéro de lot spécifique |
 | `--force` | Forcer l'exécution en environnement de production |
+| `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
 
 **Exemples :**
 
@@ -401,6 +406,7 @@ php artisan data:fresh [options]
 | Option | Description |
 |--------|-------------|
 | `--force` | Forcer l'exécution en environnement de production |
+| `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
 
 > **Attention :** Cette commande supprimera tous les enregistrements de migration et ré-exécutera chaque migration. À utiliser avec précaution.
 
@@ -775,6 +781,28 @@ return [
         */
         'auto_backup' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verrou de concurrence
+    |--------------------------------------------------------------------------
+    */
+    'lock' => [
+        /*
+        | Prendre le verrou partagé même sans l'option --isolated.
+        */
+        'enabled' => false,
+
+        /*
+        | Store de cache qui porte le verrou (null = store par défaut).
+        */
+        'store' => null,
+
+        /*
+        | Secondes après lesquelles un verrou laissé par un processus tué expire.
+        */
+        'ttl' => 3600,
+    ],
 ];
 ```
 
@@ -836,6 +864,58 @@ Empêchez les migrations incontrôlées avec des limites de timeout :
 // Ou par migration
 protected ?int $timeout = 600; // 10 minutes pour cette migration
 ```
+
+### Verrou de concurrence
+
+Deux processus `data:migrate` lancés en même temps tenteraient tous deux d'insérer le même enregistrement de suivi. Passez `--isolated` à `data:migrate`, `data:rollback` ou `data:fresh` pour prendre d'abord un verrou de cache, exactement comme `php artisan migrate --isolated` :
+
+```bash
+# Ignore l'exécution (code de sortie 0) quand une autre commande de migration de données détient le verrou
+php artisan data:migrate --isolated
+
+# Idem, mais avec le code de sortie 12 au lieu de 0 quand le verrou est détenu
+php artisan data:migrate --isolated=12
+```
+
+Les trois commandes partagent un seul verrou nommé `data-migrations` : `data:rollback --isolated` attend donc aussi la fin d'un `data:migrate --isolated` en cours. `data:fresh --isolated` conserve le verrou pendant qu'il exécute `data:migrate` en interne. Le verrou vit dans le store de cache indiqué par `lock.store` (le store par défaut si `null`) et expire après `lock.ttl` secondes si le processus est tué. Mettez `lock.enabled` à `true` pour prendre le verrou sans passer l'option :
+
+```php
+// config/data-migrations.php
+'lock' => [
+    'enabled' => true,
+    'store' => 'redis',
+    'ttl' => 7200,
+],
+```
+
+---
+
+## Événements
+
+Le migrateur émet des événements Laravel que vous pouvez écouter pour des notifications, des métriques ou un journal d'audit. Chaque événement porte l'instance de migration, son nom et la méthode exécutée (`$method`, `up` ou `down`), à l'image des événements `MigrationStarted` et `MigrationEnded` de Laravel :
+
+| Événement | Propriétés | Quand |
+|-----------|------------|-------|
+| `DataMigrationStarted` | `migration`, `name`, `method` | Juste avant l'exécution de `up()` ou `down()` |
+| `DataMigrationEnded` | `migration`, `name`, `method`, `rowsAffected`, `durationMs` | Après la mise à jour de l'enregistrement de suivi |
+| `DataMigrationFailed` | `migration`, `name`, `method`, `exception` | Avant que l'exception ne soit relancée |
+| `NoPendingDataMigrations` | `method` | Quand une exécution ou un rollback ne trouve rien à faire |
+
+```php
+use Vherbaut\DataMigrations\Events\DataMigrationEnded;
+use Vherbaut\DataMigrations\Events\DataMigrationFailed;
+
+Event::listen(DataMigrationEnded::class, function (DataMigrationEnded $event) {
+    Log::info("La migration de données {$event->name} ({$event->method}) a touché {$event->rowsAffected} lignes en {$event->durationMs} ms");
+});
+
+Event::listen(DataMigrationFailed::class, function (DataMigrationFailed $event) {
+    Notification::route('slack', config('services.slack.ops'))
+        ->notify(new DataMigrationFailedNotification($event->name, $event->exception));
+});
+```
+
+Aucun événement n'est émis en mode simulation. Le migrateur reçoit le dispatcher lors de sa première résolution : dans les tests, appelez `Event::fake()` avant le premier appel Artisan, ou enregistrez un vrai listener avec `Event::listen()`.
 
 ---
 
@@ -1061,6 +1141,8 @@ Ce package suit les principes SOLID et utilise une architecture propre :
 ```
 src/
 ├── Commands/                    # Commandes Artisan
+│   ├── Concerns/
+│   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigrateFreshCommand.php
 │   ├── DataMigrateRollbackCommand.php
@@ -1075,8 +1157,15 @@ src/
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php
 │   └── TimeoutException.php
+├── Events/
+│   ├── DataMigrationEnded.php
+│   ├── DataMigrationFailed.php
+│   ├── DataMigrationStarted.php
+│   └── NoPendingDataMigrations.php
 ├── Facades/
 │   └── DataMigrations.php
+├── Locking/
+│   └── DataMigrationsCommandMutex.php
 ├── Migration/
 │   ├── DataMigration.php        # Classe de migration de base
 │   ├── MigrationFileResolver.php

@@ -6,15 +6,18 @@ namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Console\ConfirmableTrait;
+use Illuminate\Contracts\Console\Isolatable;
 use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 
 /**
  * Command to reset and re-run all data migrations.
  */
-class DataMigrateFreshCommand extends Command
+class DataMigrateFreshCommand extends Command implements Isolatable
 {
     use ConfirmableTrait;
+    use IsolatesDataMigrations;
 
     /**
      * The name and signature of the console command.
