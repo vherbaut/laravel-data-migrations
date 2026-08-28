@@ -38,6 +38,9 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
 
+      - name: Allow end-of-life Laravel releases blocked by the Composer security policy
+        run: composer config policy.advisories.ignore laravel/framework
+
       - name: Install dependencies
         run: |
           composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
@@ -65,6 +68,9 @@ jobs:
           php-version: 8.3
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
+
+      - name: Allow end-of-life Laravel releases blocked by the Composer security policy
+        run: composer config policy.advisories.ignore laravel/framework
 
       - name: Install dependencies
         run: |
