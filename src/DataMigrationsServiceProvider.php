@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations;
 
+use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Backup\BackupServiceProvider;
 use Vherbaut\DataMigrations\Commands\DataMigrateCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateFreshCommand;
+use Vherbaut\DataMigrations\Commands\DataMigratePruneCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateRollbackCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateStatusCommand;
 use Vherbaut\DataMigrations\Commands\MakeDataMigrationCommand;
@@ -16,6 +18,8 @@ use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Listeners\RunDataMigrationsAfterMigrate;
+use Vherbaut\DataMigrations\Locking\DataMigrationsCommandMutex;
 use Vherbaut\DataMigrations\Migration\MigrationFileResolver;
 use Vherbaut\DataMigrations\Migration\MigrationRepository;
 use Vherbaut\DataMigrations\Migration\Migrator;
@@ -40,6 +44,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->registerFileResolver();
         $this->registerBackupService();
         $this->registerMigrator();
+        $this->registerCommandMutex();
     }
 
     /**
@@ -111,12 +116,26 @@ class DataMigrationsServiceProvider extends ServiceProvider
                 $app->make(MigrationRepositoryInterface::class),
                 $app['db'],
                 $app->make(MigrationFileResolverInterface::class),
-                $app->make(BackupServiceInterface::class)
+                $app->make(BackupServiceInterface::class),
+                $app['events']
             );
         });
 
         $this->app->alias(MigratorInterface::class, Migrator::class);
         $this->app->alias(MigratorInterface::class, 'data-migrator');
+    }
+
+    /**
+     * Register the mutex shared by the data migration commands.
+     *
+     * The mutex must be a singleton: it counts how many nested commands hold
+     * the lock in the current process.
+     *
+     * @return void
+     */
+    protected function registerCommandMutex(): void
+    {
+        $this->app->singleton(DataMigrationsCommandMutex::class);
     }
 
     /**
@@ -129,7 +148,18 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->registerPublishables();
         $this->registerCommands();
         $this->registerMigrations();
+        $this->registerListeners();
         $this->ensureMigrationPathExists();
+    }
+
+    /**
+     * Register the listener chaining data:migrate after schema migrations when configured.
+     *
+     * @return void
+     */
+    protected function registerListeners(): void
+    {
+        $this->app['events']->listen(CommandFinished::class, RunDataMigrationsAfterMigrate::class);
     }
 
     /**
@@ -168,6 +198,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
                 DataMigrateRollbackCommand::class,
                 DataMigrateStatusCommand::class,
                 DataMigrateFreshCommand::class,
+                DataMigratePruneCommand::class,
             ]);
         }
     }

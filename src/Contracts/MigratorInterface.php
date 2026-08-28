@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Contracts;
 
 use Illuminate\Console\OutputStyle;
+use Illuminate\Support\Collection;
+use Vherbaut\DataMigrations\DTO\MigrationRecord;
 
 /**
  * Contract for data migrator.
@@ -43,6 +45,13 @@ interface MigratorInterface
      * @return array<int, string>
      */
     public function getPendingMigrations(): array;
+
+    /**
+     * Get the tracking records whose migration file no longer exists.
+     *
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getOrphanedMigrations(): Collection;
 
     /**
      * Get all migration files.

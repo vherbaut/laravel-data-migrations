@@ -8,12 +8,15 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Vherbaut\DataMigrations\Commands\Concerns\ResolvesMigrationPaths;
 
 /**
  * Command to create a new data migration file.
  */
 class MakeDataMigrationCommand extends Command
 {
+    use ResolvesMigrationPaths;
+
     /**
      * The name and signature of the console command.
      *
@@ -23,7 +26,9 @@ class MakeDataMigrationCommand extends Command
                             {name : The name of the data migration}
                             {--table= : The table to migrate}
                             {--chunked : Create a chunked migration template}
-                            {--idempotent : Mark the migration as idempotent}';
+                            {--idempotent : Mark the migration as idempotent}
+                            {--path= : The location where the migration file should be created}
+                            {--realpath : Indicate the provided path is a pre-resolved absolute path}';
 
     /**
      * The console command description.
@@ -65,8 +70,7 @@ class MakeDataMigrationCommand extends Command
             return self::FAILURE;
         }
 
-        /** @var string $path */
-        $path = config('data-migrations.path');
+        $path = $this->getMigrationPaths()[0] ?? $this->defaultMigrationPath();
 
         $this->ensureDirectoryExists($path);
 

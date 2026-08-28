@@ -10,11 +10,26 @@ namespace Vherbaut\DataMigrations\Contracts;
 interface MigrationFileResolverInterface
 {
     /**
-     * Get all migration files from the configured path.
+     * Get all migration files from the current paths, sorted by file name.
      *
      * @return array<int, string>
      */
     public function getMigrationFiles(): array;
+
+    /**
+     * Replace the directories to scan. An empty list restores the configured path.
+     *
+     * @param array<int, string> $paths
+     * @return static
+     */
+    public function setPaths(array $paths): static;
+
+    /**
+     * Get the directories currently scanned.
+     *
+     * @return array<int, string>
+     */
+    public function getPaths(): array;
 
     /**
      * Find a migration file by its name.

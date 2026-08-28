@@ -6,16 +6,21 @@ namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Console\ConfirmableTrait;
+use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
+use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
+use Vherbaut\DataMigrations\Commands\Concerns\ResolvesMigrationPaths;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Exceptions\MigrationException;
 
 /**
  * Command to rollback data migrations.
  */
-class DataMigrateRollbackCommand extends Command
+class DataMigrateRollbackCommand extends Command implements Isolatable
 {
     use ConfirmableTrait;
+    use IsolatesDataMigrations;
+    use ResolvesMigrationPaths;
 
     /**
      * The name and signature of the console command.
@@ -25,7 +30,9 @@ class DataMigrateRollbackCommand extends Command
     protected $signature = 'data:rollback
                             {--step=0 : Number of migrations to rollback}
                             {--batch= : Rollback a specific batch number}
-                            {--force : Force the operation to run in production}';
+                            {--force : Force the operation to run in production}
+                            {--path=* : The path(s) to the data migration files to use}
+                            {--realpath : Indicate any provided migration file paths are pre-resolved absolute paths}';
 
     /**
      * The console command description.
@@ -58,6 +65,16 @@ class DataMigrateRollbackCommand extends Command
      * @return int
      */
     public function handle(): int
+    {
+        return $this->usingMigrationPaths(fn (): int => $this->rollbackMigrations());
+    }
+
+    /**
+     * Roll back the targeted migrations found in the resolved paths.
+     *
+     * @return int
+     */
+    protected function rollbackMigrations(): int
     {
         if (! $this->confirmToProceed()) {
             return self::FAILURE;

@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Vherbaut\DataMigrations\Events\DataMigrationEnded;
 
 beforeEach(function (): void {
     // Ensure data migrations table exists
@@ -228,4 +230,16 @@ PHP;
         ->assertSuccessful();
 
     expect(DB::table('data_migrations')->orderBy('migration')->pluck('batch')->all())->toBe([1, 1]);
+});
+
+it('dispatches data migration events through the application dispatcher', function (): void {
+    $received = [];
+    Event::listen(DataMigrationEnded::class, function (DataMigrationEnded $event) use (&$received): void {
+        $received[] = $event->name;
+    });
+    $file = $this->createTestMigration('command_events', dataMigrationContent('$this->affected(1);'));
+
+    $this->artisan('data:migrate', ['--force' => true])->assertSuccessful();
+
+    expect($received)->toBe([basename($file, '.php')]);
 });
