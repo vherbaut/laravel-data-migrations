@@ -9,9 +9,9 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use ReflectionMethod;
 use Vherbaut\DataMigrations\Concerns\TracksProgress;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 
 /**
  * Abstract base class for data migrations.
@@ -91,28 +91,6 @@ abstract class DataMigration implements MigrationInterface
     abstract public function up(): void;
 
     /**
-     * Reverse the data migration.
-     *
-     * @return void
-     */
-    public function down(): void
-    {
-        // Optional: Override in migration if reversible
-    }
-
-    /**
-     * Determine if this migration is reversible.
-     *
-     * @return bool
-     */
-    public function isReversible(): bool
-    {
-        $reflection = new ReflectionMethod($this, 'down');
-
-        return $reflection->getDeclaringClass()->getName() !== self::class;
-    }
-
-    /**
      * Get the estimated number of rows that will be affected.
      * Used for confirmation and progress tracking.
      *
@@ -141,7 +119,7 @@ abstract class DataMigration implements MigrationInterface
             'description' => $this->getDescription(),
             'affected_tables' => $this->affectedTables,
             'estimated_rows' => $this->getEstimatedRows(),
-            'reversible' => $this->isReversible(),
+            'reversible' => $this instanceof Reversible,
             'idempotent' => $this->idempotent,
             'uses_transaction' => $this->withinTransaction,
         ];
@@ -182,6 +160,7 @@ abstract class DataMigration implements MigrationInterface
             foreach ($records as $record) {
                 $callback($record);
                 $processed++;
+                $this->affected();
                 $this->incrementProgress();
             }
 
@@ -209,6 +188,7 @@ abstract class DataMigration implements MigrationInterface
         foreach ($this->db()->table($table)->lazyById($chunkSize, $column) as $record) {
             $callback($record);
             $processed++;
+            $this->affected();
             $this->incrementProgress();
         }
 
@@ -257,6 +237,7 @@ abstract class DataMigration implements MigrationInterface
             $totalAffected += $affected;
             $lastKey = $keys->last();
 
+            $this->affected($affected);
             $this->addProgress($affected);
         } while ($keys->count() === $chunkSize);
 

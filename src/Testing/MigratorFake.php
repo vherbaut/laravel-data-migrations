@@ -10,6 +10,7 @@ use PHPUnit\Framework\Assert;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
 use Vherbaut\DataMigrations\Migration\RollbackTargetSelector;
 
@@ -112,7 +113,7 @@ class MigratorFake implements MigratorInterface
                 continue;
             }
 
-            if (! $this->resolve($file)->isReversible()) {
+            if (! $this->resolve($file) instanceof Reversible) {
                 continue;
             }
 

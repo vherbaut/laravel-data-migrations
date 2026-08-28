@@ -20,9 +20,10 @@ it('rolls back completed migrations', function (): void {
     $content = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     protected string $description = 'Rollback test';
 
     public function up(): void
@@ -85,9 +86,10 @@ it('rolls back specific batch number', function (): void {
     $content1 = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
     public function down(): void {}
 };
@@ -102,9 +104,10 @@ PHP;
     $content2 = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
     public function down(): void {}
 };
@@ -131,9 +134,10 @@ it('rollback skips already rolled back migrations and rolls back previous batch'
     $contentA = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     protected string $description = 'Migration A';
 
     public function up(): void
@@ -162,9 +166,10 @@ PHP;
     $contentB = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     protected string $description = 'Migration B';
 
     public function up(): void
@@ -212,9 +217,10 @@ it('can re-run migration after rollback', function (): void {
     $content = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     protected string $description = 'Re-run after rollback test';
 
     public function up(): void
@@ -277,9 +283,10 @@ it('rollback --step ignores failed and rolled back records', function (): void {
     $content = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
     public function down(): void {}
 };
@@ -311,9 +318,10 @@ it('rollback --batch does not run down() again for already rolled back migration
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
 
     public function down(): void
@@ -327,9 +335,10 @@ PHP;
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
 
     public function down(): void
@@ -354,9 +363,10 @@ it('rollback --batch reports nothing when the batch only contains rolled back re
     $content = <<<'PHP'
 <?php
 
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration implements Reversible {
     public function up(): void {}
     public function down(): void {}
 };
@@ -369,4 +379,33 @@ PHP;
     $this->artisan('data:rollback', ['--batch' => 1, '--force' => true])
         ->expectsOutputToContain('No migrations found for batch 1')
         ->assertSuccessful();
+});
+
+it('skips a migration that declares down() without implementing Reversible', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void
+    {
+        $this->affected(1);
+    }
+
+    public function down(): void
+    {
+        throw new RuntimeException('down() must not run');
+    }
+};
+PHP;
+
+    $this->createTestMigration('down_without_interface', $content);
+    $this->artisan('data:migrate', ['--force' => true]);
+
+    $this->artisan('data:rollback', ['--force' => true])
+        ->expectsOutputToContain('declares down() but does not implement Reversible')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('data_migrations', ['status' => 'completed']);
 });

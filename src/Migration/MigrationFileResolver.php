@@ -6,8 +6,11 @@ namespace Vherbaut\DataMigrations\Migration;
 
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
+use ReflectionClass;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Exceptions\InvalidMigrationException;
+use Vherbaut\DataMigrations\Exceptions\MigrationNotFoundException;
 
 /**
  * Resolves migration files and instances.
@@ -114,31 +117,74 @@ class MigrationFileResolver implements MigrationFileResolverInterface
     /**
      * Resolve a migration instance from a file path.
      *
+     * A named class is instantiated when it is declared in this very file, so an
+     * application class sharing the name is never mistaken for the migration.
+     * Otherwise the file is included once and must return the migration instance.
+     *
      * @param string $file
      * @return MigrationInterface
+     * @throws MigrationNotFoundException
+     * @throws InvalidMigrationException
      */
     public function resolve(string $file): MigrationInterface
     {
+        if (! $this->files->exists($file)) {
+            throw MigrationNotFoundException::forFile($file);
+        }
+
         $class = $this->getMigrationClass($file);
 
+        if ($this->isDeclaredIn($class, $file)) {
+            return $this->ensureMigration(new $class, $file);
+        }
+
+        $migration = $this->files->getRequire($file);
+
+        if (is_object($migration)) {
+            return $this->ensureMigration($migration, $file);
+        }
+
+        if ($this->isDeclaredIn($class, $file)) {
+            return $this->ensureMigration(new $class, $file);
+        }
+
+        throw InvalidMigrationException::forFile($file, "it neither returns a migration instance nor declares the class {$class}");
+    }
+
+    /**
+     * Determine if the class exists and was declared in the given file.
+     * The answer changes once the file has been included.
+     *
+     * @param string $class
+     * @param string $file
+     * @return bool
+     *
+     * @phpstan-impure
+     */
+    protected function isDeclaredIn(string $class, string $file): bool
+    {
         if (! class_exists($class)) {
-            require_once $file;
+            return false;
         }
 
-        // Handle anonymous classes (return new class extends DataMigration)
-        $content = $this->files->get($file);
+        return (new ReflectionClass($class))->getFileName() === realpath($file);
+    }
 
-        if (Str::contains($content, 'return new class')) {
-            /** @var MigrationInterface $migration */
-            $migration = require $file;
-
-            return $migration;
+    /**
+     * Ensure the resolved object is a data migration.
+     *
+     * @param object $candidate
+     * @param string $file
+     * @return MigrationInterface
+     * @throws InvalidMigrationException
+     */
+    protected function ensureMigration(object $candidate, string $file): MigrationInterface
+    {
+        if (! $candidate instanceof MigrationInterface) {
+            throw InvalidMigrationException::forFile($file, $candidate::class.' does not implement '.MigrationInterface::class);
         }
 
-        /** @var MigrationInterface $migration */
-        $migration = new $class;
-
-        return $migration;
+        return $candidate;
     }
 
     /**

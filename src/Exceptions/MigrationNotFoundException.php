@@ -19,4 +19,15 @@ class MigrationNotFoundException extends MigrationException
     {
         return new self("Migration file not found: {$migration}");
     }
+
+    /**
+     * Create a new exception for a migration file path that does not exist.
+     *
+     * @param string $file
+     * @return self
+     */
+    public static function forFile(string $file): self
+    {
+        return new self("Migration file not found at path: {$file}");
+    }
 }

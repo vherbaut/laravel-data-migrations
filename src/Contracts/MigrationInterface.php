@@ -19,20 +19,6 @@ interface MigrationInterface
     public function up(): void;
 
     /**
-     * Reverse the data migration.
-     *
-     * @return void
-     */
-    public function down(): void;
-
-    /**
-     * Determine if this migration is reversible.
-     *
-     * @return bool
-     */
-    public function isReversible(): bool;
-
-    /**
      * Get the estimated number of rows that will be affected.
      *
      * @return int|null

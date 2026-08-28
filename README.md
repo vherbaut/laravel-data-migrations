@@ -87,7 +87,7 @@ Use seeders when you need to:
 
 ```php
 // Data Migrations: Transform real production data
-return new class extends DataMigration
+return new class extends DataMigration implements Reversible
 {
     protected string $description = 'Migrate legacy status values to new enum';
 
@@ -226,9 +226,10 @@ This creates `database/data-migrations/2024_01_15_123456_split_user_names.php`:
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration
+return new class extends DataMigration implements Reversible
 {
     protected string $description = 'Split full_name into first_name and last_name';
 
@@ -542,10 +543,10 @@ return new class extends DataMigration
 
 ### Reversible Migration
 
-Implement `down()` to enable rollback:
+Implement the `Reversible` interface and its `down()` method to enable rollback:
 
 ```php
-return new class extends DataMigration
+return new class extends DataMigration implements Reversible
 {
     protected string $description = 'Apply 10% price increase';
 
@@ -567,7 +568,7 @@ return new class extends DataMigration
 };
 ```
 
-> **Note:** Generated migrations do not declare `down()`. A migration without `down()` is skipped by `data:rollback`. Do not add an empty `down()` method: it would mark the migration as rolled back without reverting any data.
+> **Note:** Generated migrations do not implement `Reversible`. A migration that does not implement it is skipped by `data:rollback`, even when it declares a `down()` method. Do not add an empty `down()`: it would mark the migration as rolled back without reverting any data.
 
 ### Using a Specific Database Connection
 
@@ -622,7 +623,7 @@ $percentage = $this->getProgressPercentage();
 // Process records one at a time, paginated by key (chunkById under the hood)
 $processed = $this->chunk('table_name', function ($record) {
     // Process each record
-    // Progress is automatically incremented
+    // Progress and affected rows are counted automatically
 });
 
 // Memory-efficient lazy iteration (lazyById under the hood)
@@ -643,7 +644,7 @@ $affected = $this->chunkUpdate(
 $processed = $this->chunk('legacy_table', fn ($record) => $this->process($record), 500, 'legacy_id');
 ```
 
-All three helpers walk the table by key, so the key column must be unique and the callback must not change it. `chunkUpdate()` selects the keys of the next matching rows, then updates that key range: every row is visited once and the loop ends even when the update leaves the rows matching the predicate. Wrap `OR` conditions in a closure inside the callback, as with `chunkById()`.
+All three helpers add the rows they process to the affected count, so do not call `affected()` again with their return value. They walk the table by key, so the key column must be unique and the callback must not change it. `chunkUpdate()` selects the keys of the next matching rows, then updates that key range: every row is visited once and the loop ends even when the update leaves the rows matching the predicate. Wrap `OR` conditions in a closure inside the callback, as with `chunkById()`.
 
 ### Row Counting
 
@@ -686,7 +687,7 @@ public function dryRun(): array
         'description' => $this->getDescription(),
         'affected_tables' => $this->affectedTables,
         'estimated_rows' => $this->getEstimatedRows(),
-        'reversible' => $this->isReversible(),
+        'reversible' => $this instanceof Reversible,
         'idempotent' => $this->idempotent,
         'uses_transaction' => $this->withinTransaction,
     ];
@@ -729,16 +730,6 @@ return [
     |
     */
     'table' => 'data_migrations',
-
-    /*
-    |--------------------------------------------------------------------------
-    | Default Chunk Size
-    |--------------------------------------------------------------------------
-    |
-    | The default number of records to process per chunk.
-    |
-    */
-    'chunk_size' => 1000,
 
     /*
     |--------------------------------------------------------------------------
@@ -1076,7 +1067,7 @@ return new class extends DataMigration
 ### Migrate to New Schema Structure
 
 ```php
-return new class extends DataMigration
+return new class extends DataMigration implements Reversible
 {
     protected string $description = 'Migrate addresses from users to addresses table';
 
@@ -1142,6 +1133,7 @@ This package follows SOLID principles and uses clean architecture:
 | Interface | Description |
 |-----------|-------------|
 | `MigrationInterface` | Contract for data migrations |
+| `Reversible` | Contract for the migrations that `data:rollback` can revert through `down()` |
 | `MigratorInterface` | Contract for the migration runner |
 | `MigrationRepositoryInterface` | Contract for migration state persistence |
 | `MigrationFileResolverInterface` | Contract for locating and resolving migration files |
@@ -1167,6 +1159,7 @@ src/
 │   ├── MigrationRecord.php      # Typed data transfer object
 │   └── MigrationStatus.php      # Row of data:status, JSON shape
 ├── Exceptions/
+│   ├── InvalidMigrationException.php
 │   ├── MigrationException.php
 │   └── MigrationNotFoundException.php
 ├── Events/

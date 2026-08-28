@@ -26,18 +26,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Default Chunk Size
-    |--------------------------------------------------------------------------
-    |
-    | When processing large datasets, migrations can be chunked to avoid
-    | memory issues. This is the default chunk size used when not specified
-    | in the migration itself.
-    |
-    */
-    'chunk_size' => 1000,
-
-    /*
-    |--------------------------------------------------------------------------
     | Transaction Mode
     |--------------------------------------------------------------------------
     |

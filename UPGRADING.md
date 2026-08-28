@@ -24,15 +24,69 @@ Rely on the timeout of your deployment pipeline or of your database instead.
 
 ### Reversible migrations
 
-A migration that can be reverted now implements `Vherbaut\DataMigrations\Contracts\Reversible`, the interface that carries `down()`. `MigrationInterface::down()`, `MigrationInterface::isReversible()` and the empty `down()` of `DataMigration` are gone.
+`data:rollback` used reflection to guess whether a migration declared `down()`. A migration that can be reverted now says so by implementing `Vherbaut\DataMigrations\Contracts\Reversible`, the interface that carries `down()`.
+
+Before:
+
+```php
+return new class extends DataMigration
+{
+    public function up(): void { /* ... */ }
+
+    public function down(): void { /* ... */ }
+};
+```
+
+After:
+
+```php
+use Vherbaut\DataMigrations\Contracts\Reversible;
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration implements Reversible
+{
+    public function up(): void { /* ... */ }
+
+    public function down(): void { /* ... */ }
+};
+```
+
+What changes for you:
+
+- Add `implements Reversible` to every migration that declares `down()`, including abstract base classes of your own. Until you do, `data:rollback` skips the migration and prints `Skipping (declares down() but does not implement Reversible)`; the record stays `completed`.
+- `MigrationInterface::down()`, `MigrationInterface::isReversible()` and the empty `DataMigration::down()` no longer exist. Replace `$migration->isReversible()` with `$migration instanceof Reversible`. Custom `MigrationInterface` implementations drop both methods and implement `Reversible` when they support rollback.
+- `dryRun()['reversible']` and the `Reversible:` line of `data:migrate --dry-run` follow the interface.
 
 ### Migration file resolution
 
-`MigrationFileResolver::resolve()` includes a file once. A named migration class must be declared in its own file; a missing file throws `MigrationNotFoundException` and a file that does not produce a migration throws `InvalidMigrationException`.
+`MigrationFileResolver::resolve()` used to include a file twice (`require_once`, then `require` when the source contained `return new class`) and guessed the class name from the file name without checking where that class came from. It now includes a file once and resolves it the way Laravel resolves schema migrations:
+
+1. A missing file throws `Vherbaut\DataMigrations\Exceptions\MigrationNotFoundException`.
+2. When a class named after the file (`2024_01_01_000000_update_user_emails.php` gives `UpdateUserEmails`) exists and was declared in that very file, it is instantiated. An application class that merely shares the name is ignored.
+3. Otherwise the file is included once; it must return the migration instance (anonymous class) or declare the named class.
+4. Anything else throws `Vherbaut\DataMigrations\Exceptions\InvalidMigrationException`.
+
+Both exceptions extend `MigrationException`, which `data:migrate` and `data:rollback` already report with exit code 1. Migration files written from the stubs need no change. A migration file that declared a named class under a different name than the one derived from the file name now throws `InvalidMigrationException`: rename the class or return an instance from the file.
 
 ### Chunk helpers and `chunk_size`
 
-`chunk()`, `chunkLazy()` and `chunkUpdate()` count the rows they process through `affected()`. The `chunk_size` config key is honoured when a migration does not set `$chunkSize`.
+`chunk()`, `chunkLazy()` and `chunkUpdate()` now add the rows they process to the affected row count (`getRowsAffected()`, the `rows_affected` column and the `DataMigrationEnded` event). The 1.x chunked stub compensated with `$this->affected($processed)` after `chunk()`: remove that line from migrations generated with it, or the rows are counted twice.
+
+Before:
+
+```php
+$processed = $this->chunk('users', fn ($user) => $this->process($user));
+
+$this->affected($processed);
+```
+
+After:
+
+```php
+$processed = $this->chunk('users', fn ($user) => $this->process($user));
+```
+
+The `chunk_size` config key is removed: no code ever read it, and `$chunkSize` keeps its `int` type so that migrations declaring `protected int $chunkSize = 500;` keep working. Set the chunk size on the migration, or pass it to the helper.
 
 ### Tracking table schema
 

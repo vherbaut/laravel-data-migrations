@@ -8,14 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Vherbaut\DataMigrations\Contracts\Reversible` interface, carrying `down()`. `data:rollback` reverts a migration only when it implements this interface; a migration that declares `down()` without it is skipped with an explicit message
+- `InvalidMigrationException`, thrown by `MigrationFileResolver::resolve()` when a file neither returns a migration instance nor declares its migration class, and `MigrationNotFoundException::forFile()` for a missing file
+- `dryRun()['reversible']` reflects the `Reversible` interface
+
 ### Changed
 
+- `MigrationFileResolver::resolve()` includes a migration file once. A named migration class is instantiated only when it is declared in the file itself, so an application class sharing the name is never mistaken for the migration
+- `chunk()`, `chunkLazy()` and `chunkUpdate()` add the rows they process to the affected row count. The chunked stub no longer calls `affected($processed)` after `chunk()`
+- The stubs document how to implement `Reversible`
 - Minimum requirements are PHP 8.2 and Laravel 12; Laravel 13 is supported. The CI matrix covers PHP 8.2 to 8.5 on Laravel 12 and 13 and no longer needs the Composer security advisory exemption that end-of-life releases required
 - PHPStan runs at level 6
 
 ### Removed
 
 - Laravel 10 and 11 support
+- `MigrationInterface::down()`, `MigrationInterface::isReversible()` and the empty `DataMigration::down()`, replaced by the `Reversible` interface
+- The `chunk_size` config key, which no code ever read. Set `$chunkSize` on the migration instead
 - The execution timeout: `$timeout` property, `MigrationInterface::getTimeout()`, `timeout` config key and `TimeoutException`. It relied on `set_time_limit()`, which ignores time spent in database queries, so it never bounded a migration. See UPGRADING.md
 
 ## [1.2.0] - 2026-08-28

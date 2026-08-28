@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 
 it('creates a new data migration file', function (): void {
     $this->artisan('make:data-migration', ['name' => 'update_user_emails'])
@@ -94,7 +95,7 @@ it('generates a migration that is not reversible by default', function (): void 
     $content = file_get_contents($files[0]);
 
     expect($content)->not->toMatch('/^\s*public function down\(\)/m')
-        ->and(app(MigratorInterface::class)->resolve($files[0])->isReversible())->toBeFalse();
+        ->and(app(MigratorInterface::class)->resolve($files[0]))->not->toBeInstanceOf(Reversible::class);
 });
 
 it('generates a chunked migration that is not reversible by default', function (): void {
@@ -105,7 +106,7 @@ it('generates a chunked migration that is not reversible by default', function (
     $content = file_get_contents($files[0]);
 
     expect($content)->not->toMatch('/^\s*public function down\(\)/m')
-        ->and(app(MigratorInterface::class)->resolve($files[0])->isReversible())->toBeFalse();
+        ->and(app(MigratorInterface::class)->resolve($files[0]))->not->toBeInstanceOf(Reversible::class);
 });
 
 it('generates a migration that data:rollback skips instead of marking as rolled back', function (): void {
@@ -120,4 +121,15 @@ it('generates a migration that data:rollback skips instead of marking as rolled 
 
     $this->assertDatabaseHas('data_migrations', ['status' => 'completed']);
     $this->assertDatabaseMissing('data_migrations', ['status' => 'rolled_back']);
+});
+
+it('documents the Reversible interface in both generated templates', function (): void {
+    $this->artisan('make:data-migration', ['name' => 'documented'])->assertSuccessful();
+    $this->artisan('make:data-migration', ['name' => 'documented_chunked', '--chunked' => true])->assertSuccessful();
+
+    $basic = file_get_contents(glob($this->getTestMigrationPath().'/*_documented.php')[0]);
+    $chunked = file_get_contents(glob($this->getTestMigrationPath().'/*_documented_chunked.php')[0]);
+
+    expect($basic)->toContain('implements Reversible')
+        ->and($chunked)->toContain('implements Reversible');
 });

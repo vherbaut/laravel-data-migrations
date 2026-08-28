@@ -14,6 +14,7 @@ use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
 use Vherbaut\DataMigrations\Events\DataMigrationEnded;
 use Vherbaut\DataMigrations\Events\DataMigrationFailed;
@@ -345,8 +346,11 @@ class Migrator implements MigratorInterface
     {
         $instance = $this->resolve($file);
 
-        if (! $instance->isReversible()) {
-            $this->note("<fg=yellow>Skipping (not reversible):</> {$migration->migration}");
+        if (! $instance instanceof Reversible) {
+            $reason = method_exists($instance, 'down')
+                ? 'declares down() but does not implement Reversible'
+                : 'not reversible';
+            $this->note("<fg=yellow>Skipping ({$reason}):</> {$migration->migration}");
 
             return false;
         }

@@ -9,6 +9,7 @@ uses(TestCase::class)->in('Feature', 'Unit');
 
 function dataMigrationContent(string $up = '', string $properties = '', ?string $down = null): string
 {
+    $implements = $down === null ? '' : ' implements Reversible';
     $downMethod = $down === null ? '' : <<<PHP
     public function down(): void
     {
@@ -20,9 +21,10 @@ PHP;
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Vherbaut\DataMigrations\Contracts\Reversible;
 use Vherbaut\DataMigrations\Migration\DataMigration;
 
-return new class extends DataMigration {
+return new class extends DataMigration{$implements} {
     {$properties}
 
     public function up(): void

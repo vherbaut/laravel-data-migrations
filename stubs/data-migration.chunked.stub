@@ -71,16 +71,18 @@ return new class extends DataMigration
             $this->finishProgress();
         }
 
-        $this->affected($processed);
         $this->log("Processed {$processed} records");
     }
 
     // Reverse the data migration (optional).
     //
-    // Declare a down() method only when the migration can really be reversed:
-    // data:rollback calls it. Without down(), data:rollback skips this migration
-    // instead of marking it as rolled back without reverting any data.
+    // A migration that can really be reversed implements Reversible and declares
+    // down(): data:rollback calls it. Without the interface, data:rollback skips
+    // this migration instead of marking it as rolled back without reverting data.
     // Be careful with large datasets: chunk the rollback too.
+    //
+    // Add "use Vherbaut\DataMigrations\Contracts\Reversible;" at the top and
+    // "return new class extends DataMigration implements Reversible", then:
     //
     // public function down(): void
     // {

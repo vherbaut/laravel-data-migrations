@@ -241,3 +241,27 @@ it('only updates rows matching the predicate inside the key range', function ():
         ->and(DB::table('chunk_items')->where('id', 3)->value('flag'))->toBe(0)
         ->and(DB::table('chunk_items')->where('flag', true)->count())->toBe(4);
 });
+
+it('counts the rows processed by chunk() as affected', function (): void {
+    seedChunkItems(5);
+
+    $this->migration->runChunk('chunk_items', fn (object $record) => null, 2);
+
+    expect($this->migration->getRowsAffected())->toBe(5);
+});
+
+it('counts the rows processed by chunkLazy() as affected', function (): void {
+    seedChunkItems(5);
+
+    $this->migration->runChunkLazy('chunk_items', fn (object $record) => null, 2);
+
+    expect($this->migration->getRowsAffected())->toBe(5);
+});
+
+it('counts the rows updated by chunkUpdate() as affected', function (): void {
+    seedChunkItems(5);
+
+    $this->migration->runChunkUpdate('chunk_items', ['status' => 'done'], fn (Builder $query) => $query->where('status', 'pending'), 2);
+
+    expect($this->migration->getRowsAffected())->toBe(5);
+});
