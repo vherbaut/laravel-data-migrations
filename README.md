@@ -160,6 +160,8 @@ class FixUserEmailsSeeder extends Seeder
 | **Concurrency Lock** | `--isolated` option and shared cache lock across `data:migrate`, `data:rollback` and `data:fresh` |
 | **Row Threshold Alerts** | Confirmation prompts for large operations |
 | **PHPStan Level 5** | Fully typed, strict static analysis compliance |
+| **Test Helpers** | `InteractsWithDataMigrations` trait and `DataMigrations::fake()` for your test suite |
+| **Chained Runs** | Optional `run_after_migrate` hook running `data:migrate` after `php artisan migrate` |
 
 ---
 
@@ -321,6 +323,8 @@ php artisan make:data-migration {name} [options]
 | `--table=` | Specify the table being migrated |
 | `--chunked` | Use the chunked migration template |
 | `--idempotent` | Mark the migration as idempotent |
+| `--path=` | Directory where the file is created, relative to the base path unless `--realpath` |
+| `--realpath` | Treat `--path` as an absolute path |
 
 **Examples:**
 
@@ -350,6 +354,8 @@ php artisan data:migrate [options]
 | `--step` | Assign a separate batch number to each migration so they can be rolled back individually |
 | `--no-confirm` | Skip row count confirmation prompts |
 | `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
+| `--path=*` | Only use the data migrations found in these directories (repeatable, relative to the base path unless `--realpath`) |
+| `--realpath` | Treat `--path` values as absolute paths |
 
 #### Retrying failed or rolled back migrations
 
@@ -369,6 +375,8 @@ php artisan data:rollback [options]
 | `--batch=N` | Rollback a specific batch number |
 | `--force` | Force execution in production environment |
 | `--isolated[=CODE]` | Skip the run when another data migration command holds the shared lock, optionally exiting with `CODE` (see [Concurrency Lock](#concurrency-lock)) |
+| `--path=*` | Only use the data migrations found in these directories (repeatable, relative to the base path unless `--realpath`) |
+| `--realpath` | Treat `--path` values as absolute paths |
 
 **Examples:**
 
@@ -827,8 +835,26 @@ return [
         */
         'ttl' => 3600,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Run After Schema Migrations
+    |--------------------------------------------------------------------------
+    */
+    'run_after_migrate' => false,
 ];
 ```
+
+### Running Data Migrations After Schema Migrations
+
+Set `run_after_migrate` to `true` to have `data:migrate --force` run automatically once `php artisan migrate`, `migrate:fresh` or `migrate:refresh` completes successfully, so a deployment needs a single command:
+
+```php
+// config/data-migrations.php
+'run_after_migrate' => true,
+```
+
+The hook listens to Laravel's `CommandFinished` console event. It is skipped after `--pretend`, after a failed command, and in the `testing` environment, where Laravel does not dispatch console events (a `RefreshDatabase` test suite will not run your data migrations).
 
 ---
 
@@ -1190,16 +1216,22 @@ src/
 │   └── NoPendingDataMigrations.php
 ├── Facades/
 │   └── DataMigrations.php
+├── Listeners/
+│   └── RunDataMigrationsAfterMigrate.php
 ├── Locking/
 │   └── DataMigrationsCommandMutex.php
 ├── Migration/
 │   ├── DataMigration.php        # Base migration class
 │   ├── MigrationFileResolver.php
 │   ├── MigrationRepository.php
-│   └── Migrator.php
+│   ├── Migrator.php
+│   └── RollbackTargetSelector.php
 ├── Services/
 │   ├── NullBackupService.php
 │   └── SpatieBackupService.php
+├── Testing/
+│   ├── InteractsWithDataMigrations.php
+│   └── MigratorFake.php
 └── DataMigrationsServiceProvider.php
 ```
 
@@ -1219,6 +1251,12 @@ $rolledBack = DataMigrations::rollback(['step' => 1]);
 
 // Get repository
 $repo = DataMigrations::getRepository();
+
+// Records whose migration file no longer exists
+$orphaned = DataMigrations::getOrphanedMigrations();
+
+// In tests: record what would run without executing anything (see Testing)
+$fake = DataMigrations::fake();
 ```
 
 ---
@@ -1239,34 +1277,59 @@ composer phpstan
 
 ### Testing Your Migrations
 
+The `InteractsWithDataMigrations` trait runs one data migration for real, in a batch of its own, and asserts its tracking status. It needs the tracking table, so use it with `RefreshDatabase`:
+
 ```php
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Vherbaut\DataMigrations\Testing\InteractsWithDataMigrations;
 
-class DataMigrationTest extends TestCase
+class SplitUserNamesTest extends TestCase
 {
+    use InteractsWithDataMigrations;
     use RefreshDatabase;
 
     public function test_it_splits_user_names(): void
     {
-        // Arrange
-        DB::table('users')->insert([
-            'full_name' => 'John Doe',
-            'first_name' => null,
-            'last_name' => null,
-        ]);
+        DB::table('users')->insert(['full_name' => 'John Doe']);
 
-        // Act
-        $this->artisan('data:migrate', ['--force' => true])
-            ->assertSuccessful();
+        $this->runDataMigration('2024_06_01_120000_split_user_names');
 
-        // Assert
-        $this->assertDatabaseHas('users', [
-            'first_name' => 'John',
-            'last_name' => 'Doe',
-        ]);
+        $this->assertDataMigrationRan('2024_06_01_120000_split_user_names');
+        $this->assertDatabaseHas('users', ['first_name' => 'John', 'last_name' => 'Doe']);
+
+        $this->rollbackDataMigration('2024_06_01_120000_split_user_names');
+
+        $this->assertDataMigrationRolledBack('2024_06_01_120000_split_user_names');
     }
 }
 ```
+
+| Helper | Behaviour |
+|--------|-----------|
+| `runDataMigration($name)` | Runs the migration in its own batch. Throws `MigrationNotFoundException` when the file is missing and `LogicException` when it already ran |
+| `runDataMigrations()` | Runs every pending migration, like `data:migrate` |
+| `rollbackDataMigration($name)` | Rolls the migration back. Throws `LogicException` when it shares its batch with other migrations |
+| `assertDataMigrationRan($name)`, `assertDataMigrationNotRan($name)`, `assertDataMigrationFailed($name)`, `assertDataMigrationRolledBack($name)` | Assert the tracking status |
+
+### Faking the Migrator
+
+To test code that triggers data migrations (a deployment command, a listener) without executing them, swap the migrator with a fake, like `Bus::fake()`. Runs and rollbacks are recorded, reads still hit the real repository:
+
+```php
+use Vherbaut\DataMigrations\Facades\DataMigrations;
+
+public function test_deploy_command_runs_data_migrations(): void
+{
+    $fake = DataMigrations::fake();
+
+    $this->artisan('app:deploy');
+
+    $fake->assertRan('2024_06_01_120000_split_user_names');
+    $fake->assertNothingRolledBack();
+}
+```
+
+Available assertions: `assertRan($name)`, `assertNotRan($name)`, `assertNothingRan()`, `assertRolledBack($name)`, `assertNothingRolledBack()`, plus `ran()` and `rolledBack()` to inspect the recorded names. `fake()` also resets the Artisan console application, so commands resolved before the call pick up the fake.
 
 ---
 

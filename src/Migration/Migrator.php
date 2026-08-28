@@ -61,6 +61,13 @@ class Migrator implements MigratorInterface
     protected ?Dispatcher $events = null;
 
     /**
+     * Selects the records a rollback targets.
+     *
+     * @var RollbackTargetSelector
+     */
+    protected RollbackTargetSelector $rollbackTargets;
+
+    /**
      * The console output instance.
      *
      * @var OutputStyle|null
@@ -95,6 +102,7 @@ class Migrator implements MigratorInterface
         $this->fileResolver = $fileResolver;
         $this->backupService = $backupService;
         $this->events = $events;
+        $this->rollbackTargets = new RollbackTargetSelector($repository);
     }
 
     /**
@@ -308,17 +316,7 @@ class Migrator implements MigratorInterface
     public function rollback(array $options = []): array
     {
         $this->notes = [];
-        $steps = (int) ($options['step'] ?? 0);
-        $batch = isset($options['batch']) ? (int) $options['batch'] : null;
-
-        // Determine which migrations to rollback
-        if ($batch !== null) {
-            $migrations = $this->repository->getRollbackableByBatch($batch);
-        } elseif ($steps > 0) {
-            $migrations = $this->repository->getRollbackable($steps);
-        } else {
-            $migrations = $this->repository->getLast();
-        }
+        $migrations = $this->rollbackTargets->select($options);
 
         if ($migrations->isEmpty()) {
             $this->note('<info>Nothing to rollback.</info>');

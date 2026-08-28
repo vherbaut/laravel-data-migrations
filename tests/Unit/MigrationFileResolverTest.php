@@ -8,20 +8,27 @@ use Vherbaut\DataMigrations\Migration\MigrationFileResolver;
 beforeEach(function (): void {
     $this->filesystem = new Filesystem;
     $this->testPath = __DIR__.'/../fixtures/migrations';
+    $this->altPath = __DIR__.'/../fixtures/alt';
 
-    if (! is_dir($this->testPath)) {
-        mkdir($this->testPath, 0755, true);
+    foreach ([$this->testPath, $this->altPath] as $path) {
+        if (! is_dir($path)) {
+            mkdir($path, 0755, true);
+        }
     }
 });
 
 afterEach(function (): void {
-    $files = glob($this->testPath.'/*.php');
+    foreach ([$this->testPath, $this->altPath] as $path) {
+        $files = glob($path.'/*.php');
 
-    if ($files !== false) {
-        foreach ($files as $file) {
-            unlink($file);
+        if ($files !== false) {
+            foreach ($files as $file) {
+                unlink($file);
+            }
         }
     }
+
+    rmdir($this->altPath);
 });
 
 it('returns empty array when directory does not exist', function (): void {
@@ -82,4 +89,40 @@ it('returns null when migration file not found', function (): void {
     $file = $resolver->findMigrationFile('nonexistent_migration');
 
     expect($file)->toBeNull();
+});
+
+it('globs every configured path sorted by basename', function (): void {
+    file_put_contents($this->testPath.'/2024_01_02_000000_second.php', '<?php return new class {};');
+    file_put_contents($this->altPath.'/2024_01_01_000000_first.php', '<?php return new class {};');
+    file_put_contents($this->altPath.'/2024_01_03_000000_third.php', '<?php return new class {};');
+
+    $resolver = new MigrationFileResolver($this->filesystem, $this->testPath);
+    $resolver->setPaths([$this->testPath, $this->altPath]);
+
+    expect(array_map('basename', $resolver->getMigrationFiles()))
+        ->toBe(['2024_01_01_000000_first.php', '2024_01_02_000000_second.php', '2024_01_03_000000_third.php'])
+        ->and($resolver->getPaths())->toBe([$this->testPath, $this->altPath]);
+});
+
+it('ignores missing directories among the paths', function (): void {
+    file_put_contents($this->testPath.'/2024_01_01_000000_only.php', '<?php return new class {};');
+
+    $resolver = new MigrationFileResolver($this->filesystem, '/nonexistent/default');
+    $resolver->setPaths(['/nonexistent/path', $this->testPath]);
+
+    expect($resolver->getMigrationFiles())->toHaveCount(1);
+});
+
+it('uses the default path until paths are set and restores it with an empty list', function (): void {
+    $resolver = new MigrationFileResolver($this->filesystem, $this->testPath);
+
+    expect($resolver->getPaths())->toBe([$this->testPath]);
+
+    $resolver->setPaths(['/somewhere']);
+
+    expect($resolver->getPaths())->toBe(['/somewhere']);
+
+    $resolver->setPaths([]);
+
+    expect($resolver->getPaths())->toBe([$this->testPath]);
 });

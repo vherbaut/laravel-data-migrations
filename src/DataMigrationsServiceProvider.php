@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations;
 
+use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Backup\BackupServiceProvider;
@@ -17,6 +18,7 @@ use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\Listeners\RunDataMigrationsAfterMigrate;
 use Vherbaut\DataMigrations\Locking\DataMigrationsCommandMutex;
 use Vherbaut\DataMigrations\Migration\MigrationFileResolver;
 use Vherbaut\DataMigrations\Migration\MigrationRepository;
@@ -146,7 +148,18 @@ class DataMigrationsServiceProvider extends ServiceProvider
         $this->registerPublishables();
         $this->registerCommands();
         $this->registerMigrations();
+        $this->registerListeners();
         $this->ensureMigrationPathExists();
+    }
+
+    /**
+     * Register the listener chaining data:migrate after schema migrations when configured.
+     *
+     * @return void
+     */
+    protected function registerListeners(): void
+    {
+        $this->app['events']->listen(CommandFinished::class, RunDataMigrationsAfterMigrate::class);
     }
 
     /**

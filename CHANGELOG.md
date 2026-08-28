@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `data:prune` command deleting those orphaned records. It refuses to run when the migrations directory contains no file at all while records exist
 - `MigratorInterface::getOrphanedMigrations()`. Custom migrator implementations must implement it
 - `$chunkColumn` property (default `'id'`) and optional trailing `$column` parameter on `chunk()`, `chunkLazy()` and `chunkUpdate()` to paginate by another key
+- `DataMigrations::fake()`, returning a `MigratorFake` that records runs and rollbacks without executing them, with `assertRan()`, `assertNotRan()`, `assertNothingRan()`, `assertRolledBack()` and `assertNothingRolledBack()`
+- `Vherbaut\DataMigrations\Testing\InteractsWithDataMigrations` trait for application test suites: `runDataMigration()`, `runDataMigrations()`, `rollbackDataMigration()` and the `assertDataMigration*()` assertions. `runDataMigration()` throws the previously unused `MigrationNotFoundException`
+- `--path=*` and `--realpath` options on `data:migrate` and `data:rollback`, and `--path`/`--realpath` on `make:data-migration`, mirroring `artisan migrate`
+- `MigrationFileResolverInterface::setPaths()` and `getPaths()`. Custom resolver implementations must implement them
+- `run_after_migrate` config option chaining `data:migrate --force` after `migrate`, `migrate:fresh` and `migrate:refresh` through the `CommandFinished` console event. Inactive under `--pretend`, after a failed command and in the `testing` environment, where Laravel does not dispatch console events
 - Tests covering `Migrator` (transaction modes, timeout, backup, dry run), the `MigrationRepository` logging methods and the `chunk*()` helpers
 - `.gitattributes` with `export-ignore` entries so that tests, CI and tooling files are left out of the distribution archive
 - `suggest` entry for `spatie/laravel-backup`, required by the `safety.auto_backup` option
@@ -24,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `chunk()` and `chunkLazy()` paginate by key (`chunkById()` and `lazyById()`) instead of by offset, and `chunkUpdate()` walks the table by key range instead of issuing `UPDATE ... LIMIT`, which some drivers do not support. A subclass overriding one of these protected helpers must add the trailing `?string $column = null` parameter
 - The `data:status` summary line ends with an `Orphaned:` count
+- Rollback target selection (batch, step or last batch) lives in `RollbackTargetSelector`, shared by `Migrator` and `MigratorFake`
+- `MigrationFileResolver::getMigrationFiles()` sorts by file name across every configured directory (same order as before for a single directory)
 
 ### Fixed
 

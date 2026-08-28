@@ -160,6 +160,8 @@ class FixUserEmailsSeeder extends Seeder
 | **Verrou de concurrence** | Option `--isolated` et verrou de cache partagé entre `data:migrate`, `data:rollback` et `data:fresh` |
 | **Alertes de seuil** | Demandes de confirmation pour les opérations volumineuses |
 | **PHPStan Niveau 5** | Entièrement typé, conformité stricte à l'analyse statique |
+| **Helpers de test** | Trait `InteractsWithDataMigrations` et `DataMigrations::fake()` pour votre suite de tests |
+| **Enchaînement** | Option `run_after_migrate` pour lancer `data:migrate` après `php artisan migrate` |
 
 ---
 
@@ -321,6 +323,8 @@ php artisan make:data-migration {name} [options]
 | `--table=` | Spécifier la table concernée |
 | `--chunked` | Utiliser le template de migration par lots |
 | `--idempotent` | Marquer la migration comme idempotente |
+| `--path=` | Répertoire de création du fichier, relatif au chemin de base sauf avec `--realpath` |
+| `--realpath` | Considérer `--path` comme un chemin absolu |
 
 **Exemples :**
 
@@ -350,6 +354,8 @@ php artisan data:migrate [options]
 | `--step` | Attribuer un numéro de lot distinct à chaque migration afin de pouvoir les annuler une par une |
 | `--no-confirm` | Ignorer les demandes de confirmation du nombre de lignes |
 | `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
+| `--path=*` | N'utiliser que les migrations de données trouvées dans ces répertoires (répétable, relatif au chemin de base sauf avec `--realpath`) |
+| `--realpath` | Considérer les valeurs de `--path` comme des chemins absolus |
 
 #### Rejouer les migrations échouées ou annulées
 
@@ -369,6 +375,8 @@ php artisan data:rollback [options]
 | `--batch=N` | Annuler un numéro de lot spécifique |
 | `--force` | Forcer l'exécution en environnement de production |
 | `--isolated[=CODE]` | Ne rien exécuter si une autre commande de migration de données détient le verrou partagé, avec `CODE` comme code de sortie optionnel (voir [Verrou de concurrence](#verrou-de-concurrence)) |
+| `--path=*` | N'utiliser que les migrations de données trouvées dans ces répertoires (répétable, relatif au chemin de base sauf avec `--realpath`) |
+| `--realpath` | Considérer les valeurs de `--path` comme des chemins absolus |
 
 **Exemples :**
 
@@ -827,8 +835,26 @@ return [
         */
         'ttl' => 3600,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Enchaînement après les migrations de schéma
+    |--------------------------------------------------------------------------
+    */
+    'run_after_migrate' => false,
 ];
 ```
+
+### Enchaîner les migrations de données après les migrations de schéma
+
+Mettez `run_after_migrate` à `true` pour que `data:migrate --force` s'exécute automatiquement dès que `php artisan migrate`, `migrate:fresh` ou `migrate:refresh` se termine avec succès, afin qu'un déploiement ne nécessite qu'une seule commande :
+
+```php
+// config/data-migrations.php
+'run_after_migrate' => true,
+```
+
+Le hook écoute l'événement console `CommandFinished` de Laravel. Il est ignoré après `--pretend`, après une commande en échec, et dans l'environnement `testing`, où Laravel n'émet pas les événements console (une suite de tests avec `RefreshDatabase` n'exécutera pas vos migrations de données).
 
 ---
 
@@ -1190,16 +1216,22 @@ src/
 │   └── NoPendingDataMigrations.php
 ├── Facades/
 │   └── DataMigrations.php
+├── Listeners/
+│   └── RunDataMigrationsAfterMigrate.php
 ├── Locking/
 │   └── DataMigrationsCommandMutex.php
 ├── Migration/
 │   ├── DataMigration.php        # Classe de migration de base
 │   ├── MigrationFileResolver.php
 │   ├── MigrationRepository.php
-│   └── Migrator.php
+│   ├── Migrator.php
+│   └── RollbackTargetSelector.php
 ├── Services/
 │   ├── NullBackupService.php
 │   └── SpatieBackupService.php
+├── Testing/
+│   ├── InteractsWithDataMigrations.php
+│   └── MigratorFake.php
 └── DataMigrationsServiceProvider.php
 ```
 
@@ -1219,6 +1251,12 @@ $rolledBack = DataMigrations::rollback(['step' => 1]);
 
 // Obtenir le repository
 $repo = DataMigrations::getRepository();
+
+// Enregistrements dont le fichier de migration n'existe plus
+$orphaned = DataMigrations::getOrphanedMigrations();
+
+// En test : enregistrer ce qui s'exécuterait sans rien exécuter (voir Tests)
+$fake = DataMigrations::fake();
 ```
 
 ---
@@ -1239,34 +1277,59 @@ composer phpstan
 
 ### Tester vos migrations
 
+Le trait `InteractsWithDataMigrations` exécute réellement une migration de données, dans un lot dédié, et vérifie son statut de suivi. Il a besoin de la table de suivi, utilisez-le donc avec `RefreshDatabase` :
+
 ```php
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Vherbaut\DataMigrations\Testing\InteractsWithDataMigrations;
 
-class DataMigrationTest extends TestCase
+class SplitUserNamesTest extends TestCase
 {
+    use InteractsWithDataMigrations;
     use RefreshDatabase;
 
     public function test_it_splits_user_names(): void
     {
-        // Arrange (Préparer)
-        DB::table('users')->insert([
-            'full_name' => 'Jean Dupont',
-            'first_name' => null,
-            'last_name' => null,
-        ]);
+        DB::table('users')->insert(['full_name' => 'Jean Dupont']);
 
-        // Act (Agir)
-        $this->artisan('data:migrate', ['--force' => true])
-            ->assertSuccessful();
+        $this->runDataMigration('2024_06_01_120000_split_user_names');
 
-        // Assert (Vérifier)
-        $this->assertDatabaseHas('users', [
-            'first_name' => 'Jean',
-            'last_name' => 'Dupont',
-        ]);
+        $this->assertDataMigrationRan('2024_06_01_120000_split_user_names');
+        $this->assertDatabaseHas('users', ['first_name' => 'Jean', 'last_name' => 'Dupont']);
+
+        $this->rollbackDataMigration('2024_06_01_120000_split_user_names');
+
+        $this->assertDataMigrationRolledBack('2024_06_01_120000_split_user_names');
     }
 }
 ```
+
+| Helper | Comportement |
+|--------|--------------|
+| `runDataMigration($name)` | Exécute la migration dans un lot dédié. Lève `MigrationNotFoundException` si le fichier manque et `LogicException` si elle a déjà été exécutée |
+| `runDataMigrations()` | Exécute toutes les migrations en attente, comme `data:migrate` |
+| `rollbackDataMigration($name)` | Annule la migration. Lève `LogicException` si elle partage son lot avec d'autres migrations |
+| `assertDataMigrationRan($name)`, `assertDataMigrationNotRan($name)`, `assertDataMigrationFailed($name)`, `assertDataMigrationRolledBack($name)` | Vérifient le statut de suivi |
+
+### Simuler le migrateur
+
+Pour tester du code qui déclenche des migrations de données (une commande de déploiement, un listener) sans les exécuter, remplacez le migrateur par un fake, comme `Bus::fake()`. Les exécutions et rollbacks sont enregistrés, les lectures passent toujours par le vrai repository :
+
+```php
+use Vherbaut\DataMigrations\Facades\DataMigrations;
+
+public function test_deploy_command_runs_data_migrations(): void
+{
+    $fake = DataMigrations::fake();
+
+    $this->artisan('app:deploy');
+
+    $fake->assertRan('2024_06_01_120000_split_user_names');
+    $fake->assertNothingRolledBack();
+}
+```
+
+Assertions disponibles : `assertRan($name)`, `assertNotRan($name)`, `assertNothingRan()`, `assertRolledBack($name)`, `assertNothingRolledBack()`, plus `ran()` et `rolledBack()` pour inspecter les noms enregistrés. `fake()` réinitialise aussi l'application console Artisan, afin que les commandes résolues avant l'appel utilisent le fake.
 
 ---
 

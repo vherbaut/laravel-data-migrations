@@ -9,6 +9,7 @@ use Illuminate\Console\ConfirmableTrait;
 use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
 use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
+use Vherbaut\DataMigrations\Commands\Concerns\ResolvesMigrationPaths;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Exceptions\MigrationException;
 
@@ -19,6 +20,7 @@ class DataMigrateCommand extends Command implements Isolatable
 {
     use ConfirmableTrait;
     use IsolatesDataMigrations;
+    use ResolvesMigrationPaths;
 
     /**
      * The name and signature of the console command.
@@ -29,7 +31,9 @@ class DataMigrateCommand extends Command implements Isolatable
                             {--dry-run : Show what would be migrated without actually running}
                             {--force : Force the operation to run in production}
                             {--step : Force the migrations to be run so they can be rolled back individually}
-                            {--no-confirm : Skip row count confirmation}';
+                            {--no-confirm : Skip row count confirmation}
+                            {--path=* : The path(s) to the data migration files to use}
+                            {--realpath : Indicate any provided migration file paths are pre-resolved absolute paths}';
 
     /**
      * The console command description.
@@ -62,6 +66,16 @@ class DataMigrateCommand extends Command implements Isolatable
      * @return int
      */
     public function handle(): int
+    {
+        return $this->usingMigrationPaths(fn (): int => $this->runMigrations());
+    }
+
+    /**
+     * Run the pending migrations found in the resolved paths.
+     *
+     * @return int
+     */
+    protected function runMigrations(): int
     {
         if (! $this->confirmToProceed()) {
             return self::FAILURE;
