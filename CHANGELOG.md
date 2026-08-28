@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [1.2.0] - 2026-08-28
 
 - Events `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations`, dispatched by the migrator around `up()` and `down()` (never during a dry run). `Migrator` accepts an optional event dispatcher as fifth constructor argument
 - `--isolated[=CODE]` option on `data:migrate`, `data:rollback` and `data:fresh`, backed by a single cache lock shared by the three commands, with a new `lock` config block (`enabled`, `store`, `ttl`)
@@ -145,7 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clean separation of concerns
 - Typed DTOs (`MigrationRecord`)
 
-[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.2...HEAD
+[1.2.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.2...HEAD
 [1.1.2]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.3...1.1.0
