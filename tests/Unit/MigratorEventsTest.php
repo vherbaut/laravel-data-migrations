@@ -102,14 +102,6 @@ it('dispatches a no pending event when there is nothing to rollback', function (
     Event::assertDispatched(NoPendingDataMigrations::class, fn (NoPendingDataMigrations $event): bool => $event->method === 'down');
 });
 
-it('dispatches no events during a dry run', function (): void {
-    $this->createTestMigration('evented_dry_run', dataMigrationContent('$this->affected(1);'));
-
-    $this->migrator->run(['dry-run' => true]);
-
-    Event::assertNothingDispatched();
-});
-
 it('dispatches nothing for a skipped non reversible migration', function (): void {
     $file = $this->createTestMigration('evented_not_reversible', dataMigrationContent());
     insertDataMigrationRecord($this->migrator->getMigrationName($file), 1, 'completed');

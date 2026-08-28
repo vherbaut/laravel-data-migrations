@@ -60,11 +60,11 @@ it('records a single migration file without executing it', function (): void {
     expect(DB::table('data_migrations')->count())->toBe(0);
 });
 
-it('records nothing during a dry run', function (): void {
+it('records nothing when data:migrate runs in dry run mode', function (): void {
     $this->createTestMigration('dry', dataMigrationContent());
     $fake = DataMigrations::fake();
 
-    DataMigrations::run(['dry-run' => true]);
+    $this->artisan('data:migrate', ['--dry-run' => true])->assertSuccessful();
 
     $fake->assertNothingRan();
 });

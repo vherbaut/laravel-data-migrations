@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Migration;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Vherbaut\DataMigrations\Concerns\TracksProgress;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Contracts\MigrationOutput;
 use Vherbaut\DataMigrations\Contracts\Reversible;
+use Vherbaut\DataMigrations\Output\NullOutput;
 
 /**
  * Abstract base class for data migrations.
@@ -70,11 +71,11 @@ abstract class DataMigration implements MigrationInterface
     protected array $affectedTables = [];
 
     /**
-     * Console output instance.
+     * Where messages and progress are written, silent until one is set.
      *
-     * @var OutputStyle|null
+     * @var MigrationOutput|null
      */
-    protected ?OutputStyle $output = null;
+    protected ?MigrationOutput $output = null;
 
     /**
      * Number of rows affected.
@@ -268,9 +269,7 @@ abstract class DataMigration implements MigrationInterface
      */
     protected function info(string $message): void
     {
-        if ($this->output !== null) {
-            $this->output->info($message);
-        }
+        $this->output()->info($message);
     }
 
     /**
@@ -281,9 +280,7 @@ abstract class DataMigration implements MigrationInterface
      */
     protected function warn(string $message): void
     {
-        if ($this->output !== null) {
-            $this->output->warning($message);
-        }
+        $this->output()->warn($message);
     }
 
     /**
@@ -294,9 +291,7 @@ abstract class DataMigration implements MigrationInterface
      */
     protected function error(string $message): void
     {
-        if ($this->output !== null) {
-            $this->output->error($message);
-        }
+        $this->output()->error($message);
     }
 
     /**
@@ -367,16 +362,26 @@ abstract class DataMigration implements MigrationInterface
     }
 
     /**
-     * Set the console output instance.
+     * Set where messages and progress are written.
      *
-     * @param OutputStyle $output
+     * @param MigrationOutput $output
      * @return static
      */
-    public function setOutput(OutputStyle $output): static
+    public function setOutput(MigrationOutput $output): static
     {
         $this->output = $output;
 
         return $this;
+    }
+
+    /**
+     * The output receiving messages and progress.
+     *
+     * @return MigrationOutput
+     */
+    protected function output(): MigrationOutput
+    {
+        return $this->output ??= new NullOutput;
     }
 
     /**

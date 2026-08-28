@@ -125,7 +125,7 @@ it('requires force flag in production', function (): void {
     app()->detectEnvironment(fn () => 'production');
 
     $this->artisan('data:rollback')
-        ->expectsConfirmation('You are about to rollback data migrations in production. This may cause data loss. Continue?', 'no')
+        ->expectsConfirmation('Are you sure you want to run this command?', 'no')
         ->assertFailed();
 });
 

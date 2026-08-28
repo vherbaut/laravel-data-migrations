@@ -4,24 +4,19 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Contracts;
 
+use Vherbaut\DataMigrations\Exceptions\BackupFailedException;
+
 /**
- * Contract for backup services.
+ * Backs up the database before a data migration runs.
  */
 interface BackupServiceInterface
 {
     /**
-     * Backup the specified tables before migration.
+     * Create a backup, or throw when it cannot be made: the migration then does not start.
      *
-     * @param array<int, string> $tables
      * @param string $migrationName
-     * @return bool
+     * @return void
+     * @throws BackupFailedException
      */
-    public function backupTables(array $tables, string $migrationName): bool;
-
-    /**
-     * Check if the backup service is available.
-     *
-     * @return bool
-     */
-    public function isAvailable(): bool;
+    public function backup(string $migrationName): void;
 }

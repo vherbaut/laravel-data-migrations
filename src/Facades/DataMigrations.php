@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Facades;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Contracts\Console\Kernel as KernelContract;
 use Illuminate\Foundation\Console\Kernel;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Facade;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Contracts\MigrationOutput;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
@@ -26,8 +26,8 @@ use Vherbaut\DataMigrations\Testing\MigratorFake;
  * @method static array<int, string> getMigrationFiles() Get all migration files
  * @method static MigrationInterface resolve(string $file) Resolve a migration instance
  * @method static string getMigrationName(string $file) Get migration name from file path
- * @method static array<int, string> getNotes() Get the notes
- * @method static static setOutput(OutputStyle $output) Set the output instance
+ * @method static array<int, string> getBlockingMigrations() Get the failed or running migrations that block a run
+ * @method static static setOutput(MigrationOutput $output) Set where messages and progress are written
  * @method static MigrationRepositoryInterface getRepository() Get the repository
  *
  * @see MigratorInterface

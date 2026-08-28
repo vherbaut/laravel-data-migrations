@@ -24,6 +24,7 @@ use Vherbaut\DataMigrations\Migration\MigrationRepository;
 use Vherbaut\DataMigrations\Migration\Migrator;
 use Vherbaut\DataMigrations\Services\NullBackupService;
 use Vherbaut\DataMigrations\Services\SpatieBackupService;
+use Vherbaut\DataMigrations\Services\UnavailableBackupService;
 
 /**
  * Service provider for Laravel Data Migrations.
@@ -92,12 +93,15 @@ class DataMigrationsServiceProvider extends ServiceProvider
     protected function registerBackupService(): void
     {
         $this->app->singleton(BackupServiceInterface::class, function (): BackupServiceInterface {
-            // Use SpatieBackupService if available, otherwise NullBackupService
+            if (! config('data-migrations.safety.auto_backup', false)) {
+                return new NullBackupService;
+            }
+
             if (class_exists(BackupServiceProvider::class)) {
                 return new SpatieBackupService;
             }
 
-            return new NullBackupService;
+            return new UnavailableBackupService;
         });
     }
 

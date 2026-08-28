@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Vherbaut\DataMigrations\Events\DataMigrationEnded;
+use Vherbaut\DataMigrations\Events\DataMigrationStarted;
 
 beforeEach(function (): void {
     // Ensure data migrations table exists
@@ -79,7 +80,7 @@ it('requires force flag in production', function (): void {
     app()->detectEnvironment(fn () => 'production');
 
     $this->artisan('data:migrate')
-        ->expectsConfirmation('You are about to run data migrations in production. Do you wish to continue?', 'no')
+        ->expectsConfirmation('Are you sure you want to run this command?', 'no')
         ->assertFailed();
 });
 
@@ -249,4 +250,35 @@ it('dispatches data migration events through the application dispatcher', functi
     $this->artisan('data:migrate', ['--force' => true])->assertSuccessful();
 
     expect($received)->toBe([basename($file, '.php')]);
+});
+
+it('starts nothing and records nothing during a dry run', function (): void {
+    $started = 0;
+    Event::listen(DataMigrationStarted::class, function () use (&$started): void {
+        $started++;
+    });
+    $this->createTestMigration('dry_events', dataMigrationContent('$this->affected(1);'));
+
+    $this->artisan('data:migrate', ['--dry-run' => true])
+        ->expectsOutputToContain('1 migration(s) would run.')
+        ->assertSuccessful();
+
+    expect($started)->toBe(0)
+        ->and(DB::table('data_migrations')->count())->toBe(0);
+});
+
+it('warns about unresolved migrations during a dry run', function (): void {
+    $failed = $this->createTestMigration('dry_failed', dataMigrationContent());
+    insertDataMigrationRecord(basename($failed, '.php'), 1, 'failed');
+
+    $this->artisan('data:migrate', ['--dry-run' => true])
+        ->expectsOutputToContain('--retry-failed')
+        ->assertSuccessful();
+});
+
+it('skips the production confirmation when require_force_in_production is off', function (): void {
+    app()->detectEnvironment(fn () => 'production');
+    config()->set('data-migrations.safety.require_force_in_production', false);
+
+    $this->artisan('data:migrate')->assertSuccessful();
 });

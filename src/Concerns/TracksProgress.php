@@ -4,23 +4,13 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Concerns;
 
-use Illuminate\Console\OutputStyle;
-use Symfony\Component\Console\Helper\ProgressBar;
+use Vherbaut\DataMigrations\Contracts\MigrationOutput;
 
 /**
- * Provides progress tracking capabilities for data migrations.
- *
- * @property OutputStyle|null $output
+ * Counts the progress of a data migration and forwards it to its output.
  */
 trait TracksProgress
 {
-    /**
-     * The progress bar instance.
-     *
-     * @var ProgressBar|null
-     */
-    protected ?ProgressBar $progressBar = null;
-
     /**
      * Total items to process.
      *
@@ -36,7 +26,14 @@ trait TracksProgress
     protected int $progressCurrent = 0;
 
     /**
-     * Start a progress bar.
+     * The output receiving the progress.
+     *
+     * @return MigrationOutput
+     */
+    abstract protected function output(): MigrationOutput;
+
+    /**
+     * Start tracking a number of items.
      *
      * @param int $total
      * @param string $message
@@ -47,12 +44,7 @@ trait TracksProgress
         $this->progressTotal = $total;
         $this->progressCurrent = 0;
 
-        if ($this->output !== null) {
-            $this->output->writeln($message);
-            $this->progressBar = $this->output->createProgressBar($total);
-            $this->progressBar->setFormat(' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%');
-            $this->progressBar->start();
-        }
+        $this->output()->startProgress($total, $message);
     }
 
     /**
@@ -75,9 +67,7 @@ trait TracksProgress
     {
         $this->progressCurrent += $amount;
 
-        if ($this->progressBar !== null) {
-            $this->progressBar->advance($amount);
-        }
+        $this->output()->advanceProgress($amount);
     }
 
     /**
@@ -90,27 +80,17 @@ trait TracksProgress
     {
         $this->progressCurrent = $current;
 
-        if ($this->progressBar !== null) {
-            $this->progressBar->setProgress($current);
-        }
+        $this->output()->setProgress($current);
     }
 
     /**
-     * Finish the progress bar.
+     * Finish the progress tracking.
      *
      * @return void
      */
     protected function finishProgress(): void
     {
-        if ($this->progressBar !== null) {
-            $this->progressBar->finish();
-
-            if ($this->output !== null) {
-                $this->output->newLine(2);
-            }
-        }
-
-        $this->progressBar = null;
+        $this->output()->finishProgress();
     }
 
     /**

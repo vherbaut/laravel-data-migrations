@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MigrationRepositoryInterface::getUnresolved()`
 - Upgrade migration for 1.x tracking tables in `database/upgrades/`, published with `php artisan vendor:publish --tag=data-migrations-upgrade`
 - PHPStan analyses the `database/` directory
+- `Vherbaut\DataMigrations\Contracts\MigrationOutput` interface, where the migrator and the migrations write messages and progress, with `ConsoleOutput` (Artisan), `MemoryOutput` (tests and programmatic runs) and `NullOutput` implementations
+- `MigratorInterface::getBlockingMigrations()`, the failed or still running migrations that block a run; `data:migrate --dry-run` warns about them
+- `BackupFailedException` and `UnavailableBackupService`, bound when `safety.auto_backup` is on without spatie/laravel-backup
 
 ### Changed
 
@@ -31,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `running` records are no longer rollbackable, `getRan()` and `hasRun()` only consider `completed` records, and `logStart()` replaces any previous record of the migration
 - `RollbackTargetSelector::select()` accepts an `all` option selecting every completed migration
 - `DataMigrationsCommandMutex` no longer counts nested commands: `data:refresh` runs the rollback and the migrations in one process
+- `MigrationInterface::setOutput()` and `MigratorInterface::setOutput()` take a `MigrationOutput`; the migrator writes its messages to it instead of collecting notes, and a migration's `info()`, `warn()` and `error()` print styled lines
+- `data:migrate --dry-run` is handled by the command, which describes the pending migrations without calling the migrator
+- `BackupServiceInterface::backup(string $migrationName): void` runs before the tracking record is written and throws `BackupFailedException`, which aborts the migration with exit code 1; the service provider binds the implementation from `safety.auto_backup`
+- The production confirmation of `data:migrate`, `data:rollback`, `data:refresh` and `data:prune` goes through Laravel's `ConfirmableTrait`: an alert names the action and the standard `Are you sure you want to run this command?` question follows, honouring `safety.require_force_in_production`
 - Minimum requirements are PHP 8.2 and Laravel 12; Laravel 13 is supported. The CI matrix covers PHP 8.2 to 8.5 on Laravel 12 and 13 and no longer needs the Composer security advisory exemption that end-of-life releases required
 - PHPStan runs at level 6
 
@@ -42,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `data:fresh`, replaced by `data:refresh`. Truncate the tracking table yourself to run every migration again
 - `MigrationRepositoryInterface::setConnection()`, replaced by the constructor argument
 - The `Vherbaut\DataMigrations\DTO\MigrationStatus` class, renamed `MigrationStatusEntry`
+- `MigratorInterface::getNotes()` and the `dry-run` option of `MigratorInterface::run()`
+- `BackupServiceInterface::backupTables()` and `isAvailable()`; `$affectedTables` no longer drives the backup, which always dumps the whole database
 - The execution timeout: `$timeout` property, `MigrationInterface::getTimeout()`, `timeout` config key and `TimeoutException`. It relied on `set_time_limit()`, which ignores time spent in database queries, so it never bounded a migration. See UPGRADING.md
 
 ## [1.2.0] - 2026-08-28

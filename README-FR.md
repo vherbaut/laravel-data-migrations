@@ -677,6 +677,8 @@ $this->log('Migration terminée avec succès.');
 $this->log('Une erreur s\'est produite.', 'error');
 ```
 
+Messages et progression passent par le `MigrationOutput` reçu par la migration via `setOutput()` : la console depuis Artisan, rien sinon. Les tests peuvent les capturer avec `Vherbaut\DataMigrations\Output\MemoryOutput`.
+
 ### Informations de simulation
 
 Surchargez `dryRun()` pour fournir des informations détaillées pendant `--dry-run` :
@@ -847,6 +849,8 @@ php artisan data:migrate
 php artisan data:migrate --force
 ```
 
+La question est la confirmation standard de Laravel (`Are you sure you want to run this command?`), précédée d'une alerte décrivant ce que la commande va faire. Mettez `safety.require_force_in_production` à `false` pour la désactiver.
+
 ### Confirmation du nombre de lignes
 
 Lorsqu'une migration estime qu'elle affectera plus de lignes que `confirm_threshold`, vous serez invité à confirmer :
@@ -877,6 +881,8 @@ composer require spatie/laravel-backup
     'auto_backup' => true,
 ],
 ```
+
+La sauvegarde s'exécute avant le démarrage de chaque migration. Si elle échoue, ou si `auto_backup` est actif sans que le paquet soit installé, la migration ne démarre pas et la commande retourne le code 1 (`BackupFailedException`).
 
 ### Verrou de concurrence
 
@@ -1146,6 +1152,7 @@ Ce package suit les principes SOLID et utilise une architecture propre :
 | `MigrationInterface` | Contrat pour les migrations de données |
 | `Reversible` | Contrat des migrations que `data:rollback` peut annuler via `down()` |
 | `MigratorInterface` | Contrat pour le runner de migration |
+| `MigrationOutput` | Contrat de la sortie où le migrateur et les migrations écrivent messages et progression (`ConsoleOutput`, `MemoryOutput`, `NullOutput`) |
 | `MigrationRepositoryInterface` | Contrat pour la persistance de l'état des migrations |
 | `MigrationFileResolverInterface` | Contrat pour localiser et résoudre les fichiers de migration |
 | `BackupServiceInterface` | Contrat pour les services de sauvegarde |
@@ -1156,7 +1163,10 @@ Ce package suit les principes SOLID et utilise une architecture propre :
 src/
 ├── Commands/                    # Commandes Artisan
 │   ├── Concerns/
-│   │   └── IsolatesDataMigrations.php
+│   │   ├── ConfirmsProductionRun.php
+│   │   ├── IsolatesDataMigrations.php
+│   │   ├── ReportsMigrationFailures.php
+│   │   └── ResolvesMigrationPaths.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigratePruneCommand.php
 │   ├── DataMigrateRefreshCommand.php
@@ -1164,7 +1174,7 @@ src/
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
 ├── Concerns/
-│   └── TracksProgress.php       # Trait barre de progression
+│   └── TracksProgress.php       # Trait de comptage de progression
 ├── Contracts/                   # Interfaces
 ├── DTO/
 │   ├── MigrationRecord.php      # Objet de transfert de données typé
@@ -1172,6 +1182,7 @@ src/
 ├── Enums/
 │   └── MigrationStatus.php      # Statut d'un enregistrement de suivi
 ├── Exceptions/
+│   ├── BackupFailedException.php
 │   ├── InvalidMigrationException.php
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php
@@ -1193,9 +1204,14 @@ src/
 │   ├── MigrationRepository.php
 │   ├── Migrator.php
 │   └── RollbackTargetSelector.php
+├── Output/                      # Implémentations de MigrationOutput
+│   ├── ConsoleOutput.php
+│   ├── MemoryOutput.php
+│   └── NullOutput.php
 ├── Services/
 │   ├── NullBackupService.php
-│   └── SpatieBackupService.php
+│   ├── SpatieBackupService.php
+│   └── UnavailableBackupService.php
 ├── Testing/
 │   ├── InteractsWithDataMigrations.php
 │   └── MigratorFake.php
@@ -1206,12 +1222,17 @@ src/
 
 ```php
 use Vherbaut\DataMigrations\Facades\DataMigrations;
+use Vherbaut\DataMigrations\Output\MemoryOutput;
 
 // Obtenir les migrations en attente
 $pending = DataMigrations::getPendingMigrations();
 
-// Exécuter les migrations programmatiquement
-$ran = DataMigrations::run(['dry-run' => false]);
+// Exécuter les migrations programmatiquement, en capturant les messages
+$output = new MemoryOutput;
+$ran = DataMigrations::setOutput($output)->run(['retry-failed' => false]);
+
+// Migrations échouées ou encore en cours qui bloquent une exécution
+$blocking = DataMigrations::getBlockingMigrations();
 
 // Rollback
 $rolledBack = DataMigrations::rollback(['step' => 1]);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
+use Vherbaut\DataMigrations\Commands\Concerns\ConfirmsProductionRun;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 
 /**
@@ -12,6 +13,8 @@ use Vherbaut\DataMigrations\Contracts\MigratorInterface;
  */
 class DataMigratePruneCommand extends Command
 {
+    use ConfirmsProductionRun;
+
     /**
      * The name and signature of the console command.
      *
@@ -52,7 +55,7 @@ class DataMigratePruneCommand extends Command
      */
     public function handle(): int
     {
-        if (! $this->confirmToProceed()) {
+        if (! $this->confirmToProceed('You are about to delete orphaned data migration records in production.')) {
             return self::FAILURE;
         }
 
@@ -92,24 +95,5 @@ class DataMigratePruneCommand extends Command
         $this->info("{$orphaned->count()} orphaned record(s) pruned.");
 
         return self::SUCCESS;
-    }
-
-    /**
-     * Determine if the command should proceed.
-     *
-     * @return bool
-     */
-    protected function confirmToProceed(): bool
-    {
-        /** @var bool $shouldConfirm */
-        $shouldConfirm = config('data-migrations.safety.require_force_in_production', true);
-
-        if ($shouldConfirm && app()->environment('production')) {
-            return (bool) $this->option('force') || $this->confirm(
-                'You are about to delete orphaned data migration records in production. Continue?'
-            );
-        }
-
-        return true;
     }
 }

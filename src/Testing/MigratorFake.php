@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Testing;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Collection;
 use PHPUnit\Framework\Assert;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Contracts\MigrationOutput;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Contracts\Reversible;
@@ -72,10 +72,6 @@ class MigratorFake implements MigratorInterface
             $files = $this->withUnresolvedFiles($files);
         }
 
-        if ($this->isDryRun($options)) {
-            return $files;
-        }
-
         foreach ($files as $file) {
             $this->ran[] = $this->getMigrationName($file);
         }
@@ -93,10 +89,6 @@ class MigratorFake implements MigratorInterface
      */
     public function runMigration(string $file, int $batch, array $options = []): void
     {
-        if ($this->isDryRun($options)) {
-            return;
-        }
-
         $this->ran[] = $this->getMigrationName($file);
     }
 
@@ -173,16 +165,16 @@ class MigratorFake implements MigratorInterface
     /**
      * @return array<int, string>
      */
-    public function getNotes(): array
+    public function getBlockingMigrations(): array
     {
-        return $this->migrator->getNotes();
+        return $this->migrator->getBlockingMigrations();
     }
 
     /**
-     * @param OutputStyle $output
+     * @param MigrationOutput $output
      * @return static
      */
-    public function setOutput(OutputStyle $output): static
+    public function setOutput(MigrationOutput $output): static
     {
         $this->migrator->setOutput($output);
 
@@ -295,15 +287,6 @@ class MigratorFake implements MigratorInterface
         usort($files, fn (string $left, string $right): int => strcmp(basename($left), basename($right)));
 
         return $files;
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     * @return bool
-     */
-    protected function isDryRun(array $options): bool
-    {
-        return (bool) ($options['dry-run'] ?? false);
     }
 
     /**

@@ -677,6 +677,8 @@ $this->log('Migration completed successfully.');
 $this->log('An error occurred.', 'error');
 ```
 
+Messages and progress go through the `MigrationOutput` the migration received from `setOutput()`: the console when run from Artisan, nothing otherwise. Tests can capture them with `Vherbaut\DataMigrations\Output\MemoryOutput`.
+
 ### Dry Run Information
 
 Override `dryRun()` to provide detailed information during `--dry-run`:
@@ -847,6 +849,8 @@ php artisan data:migrate
 php artisan data:migrate --force
 ```
 
+The prompt is Laravel's standard confirmation (`Are you sure you want to run this command?`), preceded by an alert naming what the command is about to do. Set `safety.require_force_in_production` to `false` to disable it.
+
 ### Row Count Confirmation
 
 When a migration estimates it will affect more rows than `confirm_threshold`, you'll be prompted:
@@ -877,6 +881,8 @@ composer require spatie/laravel-backup
     'auto_backup' => true,
 ],
 ```
+
+The backup runs before each migration starts. When it fails, or when `auto_backup` is on without the package installed, the migration does not start and the command exits with code 1 (`BackupFailedException`).
 
 ### Concurrency Lock
 
@@ -1146,6 +1152,7 @@ This package follows SOLID principles and uses clean architecture:
 | `MigrationInterface` | Contract for data migrations |
 | `Reversible` | Contract for the migrations that `data:rollback` can revert through `down()` |
 | `MigratorInterface` | Contract for the migration runner |
+| `MigrationOutput` | Contract for where the migrator and the migrations write messages and progress (`ConsoleOutput`, `MemoryOutput`, `NullOutput`) |
 | `MigrationRepositoryInterface` | Contract for migration state persistence |
 | `MigrationFileResolverInterface` | Contract for locating and resolving migration files |
 | `BackupServiceInterface` | Contract for backup services |
@@ -1156,7 +1163,10 @@ This package follows SOLID principles and uses clean architecture:
 src/
 ├── Commands/                    # Artisan commands
 │   ├── Concerns/
-│   │   └── IsolatesDataMigrations.php
+│   │   ├── ConfirmsProductionRun.php
+│   │   ├── IsolatesDataMigrations.php
+│   │   ├── ReportsMigrationFailures.php
+│   │   └── ResolvesMigrationPaths.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigratePruneCommand.php
 │   ├── DataMigrateRefreshCommand.php
@@ -1164,7 +1174,7 @@ src/
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
 ├── Concerns/
-│   └── TracksProgress.php       # Progress bar trait
+│   └── TracksProgress.php       # Progress counting trait
 ├── Contracts/                   # Interfaces
 ├── DTO/
 │   ├── MigrationRecord.php      # Typed data transfer object
@@ -1172,6 +1182,7 @@ src/
 ├── Enums/
 │   └── MigrationStatus.php      # Status of a tracking record
 ├── Exceptions/
+│   ├── BackupFailedException.php
 │   ├── InvalidMigrationException.php
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php
@@ -1193,9 +1204,14 @@ src/
 │   ├── MigrationRepository.php
 │   ├── Migrator.php
 │   └── RollbackTargetSelector.php
+├── Output/                      # MigrationOutput implementations
+│   ├── ConsoleOutput.php
+│   ├── MemoryOutput.php
+│   └── NullOutput.php
 ├── Services/
 │   ├── NullBackupService.php
-│   └── SpatieBackupService.php
+│   ├── SpatieBackupService.php
+│   └── UnavailableBackupService.php
 ├── Testing/
 │   ├── InteractsWithDataMigrations.php
 │   └── MigratorFake.php
@@ -1206,12 +1222,17 @@ src/
 
 ```php
 use Vherbaut\DataMigrations\Facades\DataMigrations;
+use Vherbaut\DataMigrations\Output\MemoryOutput;
 
 // Get pending migrations
 $pending = DataMigrations::getPendingMigrations();
 
-// Run migrations programmatically
-$ran = DataMigrations::run(['dry-run' => false]);
+// Run migrations programmatically, capturing the messages
+$output = new MemoryOutput;
+$ran = DataMigrations::setOutput($output)->run(['retry-failed' => false]);
+
+// Failed or still running migrations that block a run
+$blocking = DataMigrations::getBlockingMigrations();
 
 // Rollback
 $rolledBack = DataMigrations::rollback(['step' => 1]);

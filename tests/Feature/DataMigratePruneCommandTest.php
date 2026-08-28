@@ -50,7 +50,7 @@ it('requires force flag in production', function (): void {
     insertDataMigrationRecord('vanished', 1, 'completed');
 
     $this->artisan('data:prune')
-        ->expectsConfirmation('You are about to delete orphaned data migration records in production. Continue?', 'no')
+        ->expectsConfirmation('Are you sure you want to run this command?', 'no')
         ->assertFailed();
 
     expect(DB::table('data_migrations')->count())->toBe(1);

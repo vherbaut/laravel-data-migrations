@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Contracts;
 
-use Illuminate\Console\OutputStyle;
-
 /**
  * Contract for data migrations.
  */
@@ -75,12 +73,12 @@ interface MigrationInterface
     public function getRowsAffected(): int;
 
     /**
-     * Set the console output instance.
+     * Set where messages and progress are written.
      *
-     * @param OutputStyle $output
+     * @param MigrationOutput $output
      * @return static
      */
-    public function setOutput(OutputStyle $output): static;
+    public function setOutput(MigrationOutput $output): static;
 
     /**
      * Get the database connection name.

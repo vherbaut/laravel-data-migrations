@@ -146,15 +146,28 @@ To forget every record and run everything again, which is what `data:fresh` did,
 
 ### Interfaces and output
 
-`MigrationInterface::setOutput()` and `MigratorInterface::setOutput()` receive a `Vherbaut\DataMigrations\Contracts\MigrationOutput` instead of `Illuminate\Console\OutputStyle`. `MigratorInterface::getNotes()` and the `dry-run` option of `run()` are gone.
+The domain no longer depends on the console. `MigrationInterface::setOutput()` and `MigratorInterface::setOutput()` receive a `Vherbaut\DataMigrations\Contracts\MigrationOutput` instead of `Illuminate\Console\OutputStyle`:
+
+- `Vherbaut\DataMigrations\Output\ConsoleOutput` wraps an `OutputStyle` (what the Artisan commands pass), `MemoryOutput` keeps the messages and the progress for tests and programmatic runs, `NullOutput` discards everything. A migration without output stays silent.
+- `MigratorInterface::getNotes()` is gone: read the messages from the `MemoryOutput` you passed to `setOutput()`.
+- `MigratorInterface::run()` no longer accepts the `dry-run` option: `data:migrate --dry-run` describes the pending migrations itself and never calls `run()`. Custom code that relied on the option should call `getPendingMigrations()` and `resolve($file)->dryRun()`.
+- `MigratorInterface::getBlockingMigrations()` is new and must be implemented by custom migrators.
+- Inside a migration, `$this->info()`, `$this->warn()` and `$this->error()` print styled console lines rather than Symfony blocks; `TracksProgress` now requires an `output()` method, provided by `DataMigration`.
+- The migrator prints plain messages (`Migrating: name`, `Migrated: name (12ms, 3 rows)`, `Skipping (not reversible): name`) without console markup; scripts grepping the output keep the same words.
 
 ### Backup
 
-`BackupServiceInterface::backup(string $migrationName): void` replaces `backupTables()` and `isAvailable()`. A failed backup throws `BackupFailedException` and the migration does not start.
+In 1.x, a failing backup only printed a warning and the migration ran anyway, and `backupTables()` ignored the `$tables` it received because spatie/laravel-backup only dumps whole databases. In 2.0:
+
+- `BackupServiceInterface::backup(string $migrationName): void` replaces `backupTables()` and `isAvailable()`. It runs before the tracking record is written; when it throws `Vherbaut\DataMigrations\Exceptions\BackupFailedException` (a `MigrationException`) the migration does not start, no record is created and the command exits with code 1.
+- The service provider binds `NullBackupService` when `safety.auto_backup` is off, `SpatieBackupService` when it is on and spatie/laravel-backup is installed, and `UnavailableBackupService` (which throws) when it is on without the package. Install the package or turn the option off.
+- `$affectedTables` no longer drives the backup; keep it for documentation and the dry run.
+
+Custom `BackupServiceInterface` implementations implement `backup()` and throw `BackupFailedException` on failure.
 
 ### Testing helpers
 
-`InteractsWithDataMigrations::dataMigrationStatus()` returns a `MigrationStatus` (or null); the `assertDataMigration*()` helpers are unchanged. `MigratorFake::run(['retry-failed' => true])` records the unresolved migrations as ran, and `MigratorFake` follows the `MigratorInterface` changes described above.
+`InteractsWithDataMigrations::dataMigrationStatus()` returns a `MigrationStatus` (or null); the `assertDataMigration*()` helpers are unchanged. `MigratorFake::run(['retry-failed' => true])` records the unresolved migrations as ran, `MigratorFake::run(['dry-run' => true])` no longer means anything (use `data:migrate --dry-run`), and `MigratorFake` follows the `MigratorInterface` changes described above. To assert on the messages of a real run, pass a `MemoryOutput` to `DataMigrations::setOutput()`.
 
 ### Coming from 1.1.x
 

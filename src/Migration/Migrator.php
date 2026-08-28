@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Migration;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Support\Collection;
@@ -12,6 +11,7 @@ use Throwable;
 use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
+use Vherbaut\DataMigrations\Contracts\MigrationOutput;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
 use Vherbaut\DataMigrations\Contracts\Reversible;
@@ -21,6 +21,7 @@ use Vherbaut\DataMigrations\Events\DataMigrationFailed;
 use Vherbaut\DataMigrations\Events\DataMigrationStarted;
 use Vherbaut\DataMigrations\Events\NoPendingDataMigrations;
 use Vherbaut\DataMigrations\Exceptions\UnresolvedMigrationsException;
+use Vherbaut\DataMigrations\Output\NullOutput;
 
 /**
  * Orchestrates data migration execution.
@@ -70,18 +71,11 @@ class Migrator implements MigratorInterface
     protected RollbackTargetSelector $rollbackTargets;
 
     /**
-     * The console output instance.
+     * Where messages are written.
      *
-     * @var OutputStyle|null
+     * @var MigrationOutput
      */
-    protected ?OutputStyle $output = null;
-
-    /**
-     * The notes collected during migration.
-     *
-     * @var array<int, string>
-     */
-    protected array $notes = [];
+    protected MigrationOutput $output;
 
     /**
      * Create a new migrator instance.
@@ -104,6 +98,7 @@ class Migrator implements MigratorInterface
         $this->fileResolver = $fileResolver;
         $this->backupService = $backupService;
         $this->events = $events;
+        $this->output = new NullOutput;
         $this->rollbackTargets = new RollbackTargetSelector($repository);
     }
 
@@ -121,7 +116,6 @@ class Migrator implements MigratorInterface
      */
     public function run(array $options = []): array
     {
-        $this->notes = [];
         $retryUnresolved = (bool) ($options['retry-failed'] ?? false);
 
         if (! $retryUnresolved) {
@@ -131,7 +125,7 @@ class Migrator implements MigratorInterface
         $migrations = $this->migrationsToRun($retryUnresolved);
 
         if (count($migrations) === 0) {
-            $this->note('<info>Nothing to migrate.</info>');
+            $this->output->info('Nothing to migrate.');
             $this->fireEvent(new NoPendingDataMigrations('up'));
 
             return [];
@@ -140,7 +134,7 @@ class Migrator implements MigratorInterface
         $batch = $this->repository->getNextBatchNumber();
         $step = (bool) ($options['step'] ?? false);
 
-        $this->note('<info>Running data migrations...</info>');
+        $this->output->info('Running data migrations...');
 
         $ran = [];
 
@@ -170,26 +164,17 @@ class Migrator implements MigratorInterface
         $name = $this->getMigrationName($file);
         $migration = $this->resolve($file);
 
-        if ($this->output !== null) {
-            $migration->setOutput($this->output);
-        }
+        $migration->setOutput($this->output);
 
-        $dryRun = (bool) ($options['dry-run'] ?? false);
-
-        if ($dryRun) {
-            $this->runDryRun($name, $migration);
-
-            return;
-        }
-
-        $this->note("<comment>Migrating:</comment> {$name}");
+        $this->output->line("Migrating: {$name}");
+        $this->backupService->backup($name);
 
         $this->repository->logStart($name, $batch);
         $this->fireEvent(new DataMigrationStarted($migration, $name, 'up'));
         $startTime = microtime(true);
 
         try {
-            $this->runMigrationUp($migration, $name, $options);
+            $this->runMigrationUp($migration);
 
             $durationMs = (int) ((microtime(true) - $startTime) * 1000);
 
@@ -200,11 +185,11 @@ class Migrator implements MigratorInterface
                 ['description' => $migration->getDescription()]
             );
 
-            $this->note("<info>Migrated:</info> {$name} ({$durationMs}ms, {$migration->getRowsAffected()} rows)");
+            $this->output->info("Migrated: {$name} ({$durationMs}ms, {$migration->getRowsAffected()} rows)");
             $this->fireEvent(new DataMigrationEnded($migration, $name, 'up', $migration->getRowsAffected(), $durationMs));
         } catch (Throwable $e) {
             $this->repository->logFailed($name, $e->getMessage());
-            $this->note("<error>Failed:</error> {$name} - {$e->getMessage()}");
+            $this->output->error("Failed: {$name} - {$e->getMessage()}");
             $this->fireEvent(new DataMigrationFailed($migration, $name, 'up', $e));
 
             throw $e;
@@ -215,15 +200,11 @@ class Migrator implements MigratorInterface
      * Run the migration's up method.
      *
      * @param MigrationInterface $migration
-     * @param string $name
-     * @param array<string, mixed> $options
      * @return void
      * @throws Throwable
      */
-    protected function runMigrationUp(MigrationInterface $migration, string $name, array $options): void
+    protected function runMigrationUp(MigrationInterface $migration): void
     {
-        $this->runAutoBackup($migration, $name);
-
         $useTransaction = $this->shouldUseTransaction($migration);
 
         if ($useTransaction) {
@@ -238,64 +219,6 @@ class Migrator implements MigratorInterface
     }
 
     /**
-     * Run auto backup if enabled.
-     *
-     * @param MigrationInterface $migration
-     * @param string $name
-     * @return void
-     */
-    protected function runAutoBackup(MigrationInterface $migration, string $name): void
-    {
-        /** @var bool $autoBackup */
-        $autoBackup = config('data-migrations.safety.auto_backup', false);
-
-        if (! $autoBackup) {
-            return;
-        }
-
-        if (! $this->backupService->isAvailable()) {
-            $this->note('<fg=yellow>Auto backup enabled but backup service not available.</>');
-
-            return;
-        }
-
-        $tables = $migration->getAffectedTables();
-
-        if (count($tables) === 0) {
-            return;
-        }
-
-        $this->note('<comment>Creating backup before migration...</comment>');
-
-        if ($this->backupService->backupTables($tables, $name)) {
-            $this->note('<info>Backup created successfully.</info>');
-        } else {
-            $this->note('<fg=yellow>Backup failed, continuing with migration...</>');
-        }
-    }
-
-    /**
-     * Perform a dry run of the migration.
-     *
-     * @param string $name
-     * @param MigrationInterface $migration
-     * @return void
-     */
-    protected function runDryRun(string $name, MigrationInterface $migration): void
-    {
-        $info = $migration->dryRun();
-
-        $this->note("<comment>[DRY RUN]</comment> {$name}");
-        $this->note('  Description: '.($info['description'] !== '' ? $info['description'] : 'N/A'));
-        $this->note('  Affected tables: '.(count($info['affected_tables']) > 0 ? implode(', ', $info['affected_tables']) : 'N/A'));
-        $this->note('  Estimated rows: '.($info['estimated_rows'] ?? 'Unknown'));
-        $this->note('  Reversible: '.($info['reversible'] ? 'Yes' : 'No'));
-        $this->note('  Idempotent: '.($info['idempotent'] ? 'Yes' : 'No'));
-        $this->note('  Uses transaction: '.($info['uses_transaction'] ? 'Yes' : 'No'));
-        $this->note('');
-    }
-
-    /**
      * Rollback the last batch of migrations.
      *
      * @param array<string, mixed> $options
@@ -303,11 +226,10 @@ class Migrator implements MigratorInterface
      */
     public function rollback(array $options = []): array
     {
-        $this->notes = [];
         $migrations = $this->rollbackTargets->select($options);
 
         if ($migrations->isEmpty()) {
-            $this->note('<info>Nothing to rollback.</info>');
+            $this->output->info('Nothing to rollback.');
             $this->fireEvent(new NoPendingDataMigrations('down'));
 
             return [];
@@ -332,7 +254,7 @@ class Migrator implements MigratorInterface
             $file = $this->findMigrationFile($migration->migration);
 
             if ($file === null) {
-                $this->note("<fg=yellow>Migration file not found:</> {$migration->migration}");
+                $this->output->warn("Migration file not found: {$migration->migration}");
 
                 continue;
             }
@@ -362,16 +284,14 @@ class Migrator implements MigratorInterface
             $reason = method_exists($instance, 'down')
                 ? 'declares down() but does not implement Reversible'
                 : 'not reversible';
-            $this->note("<fg=yellow>Skipping ({$reason}):</> {$migration->migration}");
+            $this->output->warn("Skipping ({$reason}): {$migration->migration}");
 
             return false;
         }
 
-        if ($this->output !== null) {
-            $instance->setOutput($this->output);
-        }
+        $instance->setOutput($this->output);
 
-        $this->note("<comment>Rolling back:</comment> {$migration->migration}");
+        $this->output->line("Rolling back: {$migration->migration}");
         $this->fireEvent(new DataMigrationStarted($instance, $migration->migration, 'down'));
 
         $startTime = microtime(true);
@@ -392,12 +312,12 @@ class Migrator implements MigratorInterface
             $this->repository->logRollback($migration->migration);
 
             $durationMs = (int) ((microtime(true) - $startTime) * 1000);
-            $this->note("<info>Rolled back:</info> {$migration->migration} ({$durationMs}ms)");
+            $this->output->info("Rolled back: {$migration->migration} ({$durationMs}ms)");
             $this->fireEvent(new DataMigrationEnded($instance, $migration->migration, 'down', $instance->getRowsAffected(), $durationMs));
 
             return true;
         } catch (Throwable $e) {
-            $this->note("<error>Rollback failed:</error> {$migration->migration} - {$e->getMessage()}");
+            $this->output->error("Rollback failed: {$migration->migration} - {$e->getMessage()}");
             $this->fireEvent(new DataMigrationFailed($instance, $migration->migration, 'down', $e));
 
             throw $e;
@@ -451,18 +371,29 @@ class Migrator implements MigratorInterface
      */
     protected function ensureNothingIsUnresolved(): void
     {
+        $blocking = $this->getBlockingMigrations();
+
+        if ($blocking !== []) {
+            throw UnresolvedMigrationsException::forMigrations($blocking);
+        }
+    }
+
+    /**
+     * Names of the unresolved migrations that block a run: they have a file
+     * and are not idempotent.
+     *
+     * @return array<int, string>
+     */
+    public function getBlockingMigrations(): array
+    {
         $unresolved = $this->unresolvedNames();
 
-        $blocking = Collection::make($this->getMigrationFiles())
+        return Collection::make($this->getMigrationFiles())
             ->filter(fn (string $file): bool => in_array($this->getMigrationName($file), $unresolved, true))
             ->reject(fn (string $file): bool => $this->resolve($file)->isIdempotent())
             ->map(fn (string $file): string => $this->getMigrationName($file))
             ->values()
             ->all();
-
-        if ($blocking !== []) {
-            throw UnresolvedMigrationsException::forMigrations($blocking);
-        }
     }
 
     /**
@@ -567,37 +498,12 @@ class Migrator implements MigratorInterface
     }
 
     /**
-     * Add a note/message.
+     * Set where messages and progress are written.
      *
-     * @param string $message
-     * @return void
-     */
-    protected function note(string $message): void
-    {
-        $this->notes[] = $message;
-
-        if ($this->output !== null) {
-            $this->output->writeln($message);
-        }
-    }
-
-    /**
-     * Get the notes.
-     *
-     * @return array<int, string>
-     */
-    public function getNotes(): array
-    {
-        return $this->notes;
-    }
-
-    /**
-     * Set the output instance.
-     *
-     * @param OutputStyle $output
+     * @param MigrationOutput $output
      * @return static
      */
-    public function setOutput(OutputStyle $output): static
+    public function setOutput(MigrationOutput $output): static
     {
         $this->output = $output;
 

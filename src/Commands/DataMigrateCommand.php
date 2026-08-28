@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Console\ConfirmableTrait;
 use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
+use Vherbaut\DataMigrations\Commands\Concerns\ConfirmsProductionRun;
 use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
+use Vherbaut\DataMigrations\Commands\Concerns\ReportsMigrationFailures;
 use Vherbaut\DataMigrations\Commands\Concerns\ResolvesMigrationPaths;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
-use Vherbaut\DataMigrations\Exceptions\MigrationException;
+use Vherbaut\DataMigrations\Output\ConsoleOutput;
 
 /**
- * Command to run pending data migrations.
+ * Run the pending data migrations.
  */
 class DataMigrateCommand extends Command implements Isolatable
 {
-    use ConfirmableTrait;
+    use ConfirmsProductionRun;
     use IsolatesDataMigrations;
+    use ReportsMigrationFailures;
     use ResolvesMigrationPaths;
 
     /**
@@ -32,7 +34,7 @@ class DataMigrateCommand extends Command implements Isolatable
                             {--force : Force the operation to run in production}
                             {--step : Force the migrations to be run so they can be rolled back individually}
                             {--no-confirm : Skip row count confirmation}
-                        {--retry-failed : Run again the migrations recorded as failed, or still running after a crash}
+                            {--retry-failed : Run again the migrations recorded as failed, or still running after a crash}
                             {--path=* : The path(s) to the data migration files to use}
                             {--realpath : Indicate any provided migration file paths are pre-resolved absolute paths}';
 
@@ -44,15 +46,11 @@ class DataMigrateCommand extends Command implements Isolatable
     protected $description = 'Run pending data migrations';
 
     /**
-     * The migrator instance.
-     *
      * @var MigratorInterface
      */
     protected MigratorInterface $migrator;
 
     /**
-     * Create a new command instance.
-     *
      * @param MigratorInterface $migrator
      */
     public function __construct(MigratorInterface $migrator)
@@ -72,100 +70,123 @@ class DataMigrateCommand extends Command implements Isolatable
     }
 
     /**
-     * Run the pending migrations found in the resolved paths.
-     *
      * @return int
      */
     protected function runMigrations(): int
     {
-        if (! $this->confirmToProceed()) {
+        if ($this->option('dry-run')) {
+            return $this->dryRun();
+        }
+
+        if (! $this->confirmToProceed('You are about to run data migrations in production.')) {
             return self::FAILURE;
         }
 
-        $this->migrator->setOutput($this->output);
-
-        if (! $this->migrator->getRepository()->repositoryExists()) {
-            $this->error('Data migrations table not found. Run: php artisan migrate');
-
+        if (! $this->trackingTableExists()) {
             return self::FAILURE;
         }
 
-        $options = [
-            'dry-run' => (bool) $this->option('dry-run'),
-            'step' => (bool) $this->option('step'),
-            'retry-failed' => (bool) $this->option('retry-failed'),
-        ];
-
-        if ($options['dry-run']) {
-            $this->info('');
-            $this->info('=== DRY RUN MODE ===');
-            $this->info('');
-        }
-
-        // Check confirm threshold before running
-        if (! $options['dry-run'] && ! $this->confirmRowThreshold()) {
+        if (! $this->confirmRowThreshold()) {
             return self::FAILURE;
         }
+
+        $this->migrator->setOutput(new ConsoleOutput($this->output));
 
         try {
-            $migrations = $this->migrator->run($options);
-
-            if (count($migrations) === 0 && ! $options['dry-run']) {
-                return self::SUCCESS;
-            }
-
-            if ($options['dry-run']) {
-                $this->info('');
-                $this->info(count($migrations).' migration(s) would run.');
-            }
+            $this->migrator->run([
+                'step' => (bool) $this->option('step'),
+                'retry-failed' => (bool) $this->option('retry-failed'),
+            ]);
 
             return self::SUCCESS;
-        } catch (MigrationException $e) {
-            $this->error("Migration error: {$e->getMessage()}");
-
-            return self::FAILURE;
-        } catch (Throwable $e) {
-            $this->error("Unexpected error: {$e->getMessage()}");
-
-            if ($this->output->isVerbose()) {
-                $this->line($e->getTraceAsString());
-            }
-
-            return self::FAILURE;
+        } catch (Throwable $exception) {
+            return $this->reportFailure($exception, 'Migration error');
         }
     }
 
     /**
-     * Determine if the command should proceed.
+     * Describe the pending migrations without running anything.
      *
+     * @return int
+     */
+    protected function dryRun(): int
+    {
+        if (! $this->trackingTableExists()) {
+            return self::FAILURE;
+        }
+
+        $this->info('');
+        $this->info('=== DRY RUN MODE ===');
+        $this->info('');
+
+        $pending = $this->migrator->getPendingMigrations();
+
+        foreach ($pending as $file) {
+            $this->describe($this->migrator->getMigrationName($file), $this->migrator->resolve($file)->dryRun());
+        }
+
+        $blocking = $this->migrator->getBlockingMigrations();
+
+        if ($blocking !== []) {
+            $this->warn('These failed or still running migrations block the run until --retry-failed is passed: '.implode(', ', $blocking));
+        }
+
+        $this->info('');
+        $this->info(count($pending).' migration(s) would run.');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @param string $name
+     * @param array{
+     *     description: string,
+     *     affected_tables: array<int, string>,
+     *     estimated_rows: int|null,
+     *     reversible: bool,
+     *     idempotent: bool,
+     *     uses_transaction: bool
+     * } $info
+     * @return void
+     */
+    protected function describe(string $name, array $info): void
+    {
+        $this->line("<comment>[DRY RUN]</comment> {$name}");
+        $this->line('  Description: '.($info['description'] !== '' ? $info['description'] : 'N/A'));
+        $this->line('  Affected tables: '.(count($info['affected_tables']) > 0 ? implode(', ', $info['affected_tables']) : 'N/A'));
+        $this->line('  Estimated rows: '.($info['estimated_rows'] ?? 'Unknown'));
+        $this->line('  Reversible: '.($info['reversible'] ? 'Yes' : 'No'));
+        $this->line('  Idempotent: '.($info['idempotent'] ? 'Yes' : 'No'));
+        $this->line('  Uses transaction: '.($info['uses_transaction'] ? 'Yes' : 'No'));
+        $this->line('');
+    }
+
+    /**
      * @return bool
      */
-    protected function confirmToProceed(): bool
+    protected function trackingTableExists(): bool
     {
-        if ($this->option('dry-run')) {
+        if ($this->migrator->getRepository()->repositoryExists()) {
             return true;
         }
 
-        /** @var bool $shouldConfirm */
-        $shouldConfirm = config('data-migrations.safety.require_force_in_production', true);
+        $this->error('Data migrations table not found. Run: php artisan migrate');
 
-        if ($shouldConfirm && app()->environment('production')) {
-            return (bool) $this->option('force') || $this->confirm(
-                'You are about to run data migrations in production. Do you wish to continue?'
-            );
-        }
-
-        return true;
+        return false;
     }
 
     /**
-     * Confirm if estimated rows exceed the threshold.
+     * Ask for confirmation when the estimated rows exceed the configured threshold.
      *
      * @return bool
      */
     protected function confirmRowThreshold(): bool
     {
-        if ($this->option('no-confirm') || $this->option('force')) {
+        if ($this->option('no-confirm')) {
+            return true;
+        }
+
+        if ($this->option('force')) {
             return true;
         }
 
@@ -176,25 +197,19 @@ class DataMigrateCommand extends Command implements Isolatable
             return true;
         }
 
-        $pendingMigrations = $this->migrator->getPendingMigrations();
         $totalEstimatedRows = 0;
 
-        foreach ($pendingMigrations as $file) {
-            $migration = $this->migrator->resolve($file);
-            $estimatedRows = $migration->getEstimatedRows();
-
-            if ($estimatedRows !== null) {
-                $totalEstimatedRows += $estimatedRows;
-            }
+        foreach ($this->migrator->getPendingMigrations() as $file) {
+            $totalEstimatedRows += $this->migrator->resolve($file)->getEstimatedRows() ?? 0;
         }
 
-        if ($totalEstimatedRows > $threshold) {
-            $this->warn("Estimated rows to be affected: {$totalEstimatedRows}");
-            $this->warn("This exceeds the confirmation threshold of {$threshold} rows.");
-
-            return $this->confirm('Do you wish to continue?');
+        if ($totalEstimatedRows <= $threshold) {
+            return true;
         }
 
-        return true;
+        $this->warn("Estimated rows to be affected: {$totalEstimatedRows}");
+        $this->warn("This exceeds the confirmation threshold of {$threshold} rows.");
+
+        return $this->confirm('Do you wish to continue?');
     }
 }

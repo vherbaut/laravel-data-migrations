@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Console\ConfirmableTrait;
 use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
+use Vherbaut\DataMigrations\Commands\Concerns\ConfirmsProductionRun;
 use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
+use Vherbaut\DataMigrations\Commands\Concerns\ReportsMigrationFailures;
 use Vherbaut\DataMigrations\Commands\Concerns\ResolvesMigrationPaths;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
-use Vherbaut\DataMigrations\Exceptions\MigrationException;
+use Vherbaut\DataMigrations\Output\ConsoleOutput;
 
 /**
  * Command to rollback data migrations.
  */
 class DataMigrateRollbackCommand extends Command implements Isolatable
 {
-    use ConfirmableTrait;
+    use ConfirmsProductionRun;
     use IsolatesDataMigrations;
+    use ReportsMigrationFailures;
     use ResolvesMigrationPaths;
 
     /**
@@ -76,11 +78,11 @@ class DataMigrateRollbackCommand extends Command implements Isolatable
      */
     protected function rollbackMigrations(): int
     {
-        if (! $this->confirmToProceed()) {
+        if (! $this->confirmToProceed('You are about to roll back data migrations in production. This may cause data loss.')) {
             return self::FAILURE;
         }
 
-        $this->migrator->setOutput($this->output);
+        $this->migrator->setOutput(new ConsoleOutput($this->output));
 
         if (! $this->migrator->getRepository()->repositoryExists()) {
             $this->error('Data migrations table not found.');
@@ -120,37 +122,8 @@ class DataMigrateRollbackCommand extends Command implements Isolatable
             $this->info(count($rolledBack).' migration(s) rolled back.');
 
             return self::SUCCESS;
-        } catch (MigrationException $e) {
-            $this->error("Rollback error: {$e->getMessage()}");
-
-            return self::FAILURE;
-        } catch (Throwable $e) {
-            $this->error("Unexpected error: {$e->getMessage()}");
-
-            if ($this->output->isVerbose()) {
-                $this->line($e->getTraceAsString());
-            }
-
-            return self::FAILURE;
+        } catch (Throwable $exception) {
+            return $this->reportFailure($exception, 'Rollback error');
         }
-    }
-
-    /**
-     * Determine if the command should proceed.
-     *
-     * @return bool
-     */
-    protected function confirmToProceed(): bool
-    {
-        /** @var bool $shouldConfirm */
-        $shouldConfirm = config('data-migrations.safety.require_force_in_production', true);
-
-        if ($shouldConfirm && app()->environment('production')) {
-            return (bool) $this->option('force') || $this->confirm(
-                'You are about to rollback data migrations in production. This may cause data loss. Continue?'
-            );
-        }
-
-        return true;
     }
 }

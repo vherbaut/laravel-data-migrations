@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Vherbaut\DataMigrations\Contracts;
 
-use Illuminate\Console\OutputStyle;
 use Illuminate\Support\Collection;
 use Vherbaut\DataMigrations\DTO\MigrationRecord;
 
@@ -77,19 +76,20 @@ interface MigratorInterface
     public function getMigrationName(string $file): string;
 
     /**
-     * Get the notes.
+     * Names of the migrations recorded as failed or still running that block a
+     * run: they have a file and are not idempotent.
      *
      * @return array<int, string>
      */
-    public function getNotes(): array;
+    public function getBlockingMigrations(): array;
 
     /**
-     * Set the output instance.
+     * Set where messages and progress are written.
      *
-     * @param OutputStyle $output
+     * @param MigrationOutput $output
      * @return static
      */
-    public function setOutput(OutputStyle $output): static;
+    public function setOutput(MigrationOutput $output): static;
 
     /**
      * Get the repository.

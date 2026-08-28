@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\DataMigrationsServiceProvider;
+use Vherbaut\DataMigrations\Exceptions\BackupFailedException;
+use Vherbaut\DataMigrations\Services\NullBackupService;
+use Vherbaut\DataMigrations\Services\UnavailableBackupService;
 
 beforeEach(function (): void {
     $this->databasePath = sys_get_temp_dir().'/data-migrations-'.uniqid();
@@ -97,4 +101,21 @@ it('keeps the upgrade migration out of the migrations publish tag', function ():
     $paths = ServiceProvider::pathsToPublish(DataMigrationsServiceProvider::class, 'data-migrations-migrations');
 
     expect(array_map('realpath', array_keys($paths)))->toBe([realpath(__DIR__.'/../../database/migrations')]);
+});
+
+it('binds a null backup service when auto backup is off', function (): void {
+    config(['data-migrations.safety.auto_backup' => false]);
+    $this->app->forgetInstance(BackupServiceInterface::class);
+
+    expect($this->app->make(BackupServiceInterface::class))->toBeInstanceOf(NullBackupService::class);
+});
+
+it('binds a backup service that refuses to run when auto backup is on without spatie/laravel-backup', function (): void {
+    config(['data-migrations.safety.auto_backup' => true]);
+    $this->app->forgetInstance(BackupServiceInterface::class);
+
+    $service = $this->app->make(BackupServiceInterface::class);
+
+    expect($service)->toBeInstanceOf(UnavailableBackupService::class)
+        ->and(fn () => $service->backup('any'))->toThrow(BackupFailedException::class, 'spatie/laravel-backup');
 });

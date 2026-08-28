@@ -6,58 +6,35 @@ namespace Vherbaut\DataMigrations\Services;
 
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
-use Spatie\Backup\BackupServiceProvider;
 use Throwable;
 use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
+use Vherbaut\DataMigrations\Exceptions\BackupFailedException;
 
 /**
- * Backup service using spatie/laravel-backup.
+ * Backs up the database with spatie/laravel-backup (backup:run --only-db).
  */
 class SpatieBackupService implements BackupServiceInterface
 {
     /**
-     * Backup the specified tables before migration.
-     *
-     * @param array<int, string> $tables
      * @param string $migrationName
-     * @return bool
+     * @return void
+     * @throws BackupFailedException
      */
-    public function backupTables(array $tables, string $migrationName): bool
+    public function backup(string $migrationName): void
     {
-        if (! $this->isAvailable()) {
-            return false;
-        }
-
         try {
-            // Run backup with only-db option
             $exitCode = Artisan::call('backup:run', [
                 '--only-db' => true,
                 '--disable-notifications' => true,
             ]);
-
-            if ($exitCode === 0) {
-                Log::info("[DataMigration] Backup created before migration: {$migrationName}");
-
-                return true;
-            }
-
-            Log::warning("[DataMigration] Backup command returned non-zero exit code: {$exitCode}");
-
-            return false;
-        } catch (Throwable $e) {
-            Log::error("[DataMigration] Backup failed: {$e->getMessage()}");
-
-            return false;
+        } catch (Throwable $exception) {
+            throw BackupFailedException::forMigration($migrationName, $exception->getMessage());
         }
-    }
 
-    /**
-     * Check if the backup service is available.
-     *
-     * @return bool
-     */
-    public function isAvailable(): bool
-    {
-        return class_exists(BackupServiceProvider::class);
+        if ($exitCode !== 0) {
+            throw BackupFailedException::forMigration($migrationName, "backup:run exited with code {$exitCode}");
+        }
+
+        Log::info("[DataMigration] Backup created before migration: {$migrationName}");
     }
 }

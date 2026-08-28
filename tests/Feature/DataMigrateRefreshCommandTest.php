@@ -64,7 +64,7 @@ it('requires force flag in production', function (): void {
     app()->detectEnvironment(fn () => 'production');
 
     $this->artisan('data:refresh')
-        ->expectsConfirmation('You are about to roll back and run again ALL data migrations in production. Continue?', 'no')
+        ->expectsConfirmation('Are you sure you want to run this command?', 'no')
         ->assertFailed();
 });
 

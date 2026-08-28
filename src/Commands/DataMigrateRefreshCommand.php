@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Console\ConfirmableTrait;
 use Illuminate\Contracts\Console\Isolatable;
 use Throwable;
+use Vherbaut\DataMigrations\Commands\Concerns\ConfirmsProductionRun;
 use Vherbaut\DataMigrations\Commands\Concerns\IsolatesDataMigrations;
+use Vherbaut\DataMigrations\Commands\Concerns\ReportsMigrationFailures;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
-use Vherbaut\DataMigrations\Exceptions\MigrationException;
+use Vherbaut\DataMigrations\Output\ConsoleOutput;
 
 /**
  * Roll back every completed data migration that can be reverted, then run
@@ -18,8 +19,9 @@ use Vherbaut\DataMigrations\Exceptions\MigrationException;
  */
 class DataMigrateRefreshCommand extends Command implements Isolatable
 {
-    use ConfirmableTrait;
+    use ConfirmsProductionRun;
     use IsolatesDataMigrations;
+    use ReportsMigrationFailures;
 
     /**
      * The name and signature of the console command.
@@ -57,11 +59,11 @@ class DataMigrateRefreshCommand extends Command implements Isolatable
      */
     public function handle(): int
     {
-        if (! $this->confirmToProceed()) {
+        if (! $this->confirmToProceed('You are about to roll back and run again every data migration in production.')) {
             return self::FAILURE;
         }
 
-        $this->migrator->setOutput($this->output);
+        $this->migrator->setOutput(new ConsoleOutput($this->output));
 
         if (! $this->migrator->getRepository()->repositoryExists()) {
             $this->error('Data migrations table not found. Run: php artisan migrate');
@@ -74,43 +76,8 @@ class DataMigrateRefreshCommand extends Command implements Isolatable
             $this->migrator->run();
 
             return self::SUCCESS;
-        } catch (MigrationException $exception) {
-            $this->error("Migration error: {$exception->getMessage()}");
-
-            return self::FAILURE;
         } catch (Throwable $exception) {
-            $this->error("Unexpected error: {$exception->getMessage()}");
-
-            if ($this->output->isVerbose()) {
-                $this->line($exception->getTraceAsString());
-            }
-
-            return self::FAILURE;
+            return $this->reportFailure($exception, 'Refresh error');
         }
-    }
-
-    /**
-     * Confirm before running in production, unless --force is given.
-     *
-     * @return bool
-     */
-    protected function confirmToProceed(): bool
-    {
-        /** @var bool $shouldConfirm */
-        $shouldConfirm = config('data-migrations.safety.require_force_in_production', true);
-
-        if (! $shouldConfirm) {
-            return true;
-        }
-
-        if (! app()->environment('production')) {
-            return true;
-        }
-
-        if ((bool) $this->option('force')) {
-            return true;
-        }
-
-        return $this->confirm('You are about to roll back and run again ALL data migrations in production. Continue?');
     }
 }

@@ -8,8 +8,10 @@ use Illuminate\Support\Facades\Schema;
 use Vherbaut\DataMigrations\Contracts\BackupServiceInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationFileResolverInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
+use Vherbaut\DataMigrations\Exceptions\BackupFailedException;
 use Vherbaut\DataMigrations\Exceptions\UnresolvedMigrationsException;
 use Vherbaut\DataMigrations\Migration\Migrator;
+use Vherbaut\DataMigrations\Output\MemoryOutput;
 
 beforeEach(function (): void {
     $this->artisan('migrate');
@@ -21,23 +23,18 @@ beforeEach(function (): void {
 
     $this->backup = new class implements BackupServiceInterface
     {
-        public bool $available = true;
-
-        public bool $result = true;
-
-        /** @var array<int, array{0: array<int, string>, 1: string}> */
+        /** @var array<int, string> */
         public array $calls = [];
 
-        public function backupTables(array $tables, string $migrationName): bool
-        {
-            $this->calls[] = [$tables, $migrationName];
+        public ?BackupFailedException $failure = null;
 
-            return $this->result;
-        }
-
-        public function isAvailable(): bool
+        public function backup(string $migrationName): void
         {
-            return $this->available;
+            $this->calls[] = $migrationName;
+
+            if ($this->failure !== null) {
+                throw $this->failure;
+            }
         }
     };
 
@@ -47,6 +44,8 @@ beforeEach(function (): void {
         app(MigrationFileResolverInterface::class),
         $this->backup,
     );
+    $this->output = new MemoryOutput;
+    $this->migrator->setOutput($this->output);
 });
 
 it('rolls back the migration changes when a migration throws inside a transaction in auto mode', function (): void {
@@ -95,82 +94,22 @@ it('never wraps the migration in a transaction in never mode', function (): void
         ->and(DB::table('widgets')->count())->toBe(1);
 });
 
-it('backs up the affected tables before running when auto backup is enabled', function (): void {
-    config()->set('data-migrations.safety.auto_backup', true);
-
-    $file = $this->createTestMigration('with_backup', dataMigrationContent(
-        "DB::table('widgets')->insert(['name' => 'one']);",
-        "protected array \$affectedTables = ['widgets'];",
-    ));
+it('backs up before running the migration', function (): void {
+    $file = $this->createTestMigration('with_backup', dataMigrationContent("DB::table('widgets')->insert(['name' => 'one']);"));
 
     $this->migrator->run();
 
-    expect($this->backup->calls)->toBe([[['widgets'], $this->migrator->getMigrationName($file)]])
-        ->and($this->migrator->getNotes())->toContain('<info>Backup created successfully.</info>')
+    expect($this->backup->calls)->toBe([$this->migrator->getMigrationName($file)])
         ->and(DB::table('widgets')->count())->toBe(1);
 });
 
-it('does not call the backup service when auto backup is disabled', function (): void {
-    config()->set('data-migrations.safety.auto_backup', false);
+it('aborts the migration without any record when the backup fails', function (): void {
+    $this->backup->failure = BackupFailedException::forMigration('with_failing_backup', 'disk full');
+    $this->createTestMigration('with_failing_backup', dataMigrationContent("DB::table('widgets')->insert(['name' => 'one']);"));
 
-    $this->createTestMigration('without_backup', dataMigrationContent('', "protected array \$affectedTables = ['widgets'];"));
-
-    $this->migrator->run();
-
-    expect($this->backup->calls)->toBe([]);
-});
-
-it('skips the backup when the migration declares no affected tables', function (): void {
-    config()->set('data-migrations.safety.auto_backup', true);
-
-    $this->createTestMigration('backup_without_tables', dataMigrationContent(''));
-
-    $this->migrator->run();
-
-    expect($this->backup->calls)->toBe([]);
-});
-
-it('notes that the backup service is unavailable and still runs the migration', function (): void {
-    config()->set('data-migrations.safety.auto_backup', true);
-    $this->backup->available = false;
-
-    $this->createTestMigration('backup_unavailable', dataMigrationContent(
-        "DB::table('widgets')->insert(['name' => 'one']);",
-        "protected array \$affectedTables = ['widgets'];",
-    ));
-
-    $this->migrator->run();
-
-    expect($this->backup->calls)->toBe([])
-        ->and($this->migrator->getNotes())->toContain('<fg=yellow>Auto backup enabled but backup service not available.</>')
-        ->and(DB::table('widgets')->count())->toBe(1);
-});
-
-it('continues when the backup fails', function (): void {
-    config()->set('data-migrations.safety.auto_backup', true);
-    $this->backup->result = false;
-
-    $this->createTestMigration('backup_failing', dataMigrationContent(
-        "DB::table('widgets')->insert(['name' => 'one']);",
-        "protected array \$affectedTables = ['widgets'];",
-    ));
-
-    $this->migrator->run();
-
-    expect($this->migrator->getNotes())->toContain('<fg=yellow>Backup failed, continuing with migration...</>')
-        ->and(DB::table('widgets')->count())->toBe(1)
-        ->and(DB::table('data_migrations')->value('status'))->toBe('completed');
-});
-
-it('does not log a start record during a dry run', function (): void {
-    $file = $this->createTestMigration('dry_run', dataMigrationContent("DB::table('widgets')->insert(['name' => 'one']);"));
-
-    $ran = $this->migrator->run(['dry-run' => true]);
-
-    expect($ran)->toBe([$file])
-        ->and(DB::table('data_migrations')->count())->toBe(0)
+    expect(fn () => $this->migrator->run())->toThrow(BackupFailedException::class, 'disk full')
         ->and(DB::table('widgets')->count())->toBe(0)
-        ->and($this->migrator->getNotes())->toContain("<comment>[DRY RUN]</comment> {$this->migrator->getMigrationName($file)}");
+        ->and(DB::table('data_migrations')->count())->toBe(0);
 });
 
 it('returns the ran files and records completed migrations', function (): void {
@@ -196,7 +135,7 @@ it('notes a missing file on rollback and leaves the record untouched', function 
     $rolledBack = $this->migrator->rollback();
 
     expect($rolledBack)->toBe([])
-        ->and($this->migrator->getNotes())->toContain('<fg=yellow>Migration file not found:</> missing_migration')
+        ->and($this->output->lines())->toContain('Migration file not found: missing_migration')
         ->and(DB::table('data_migrations')->value('status'))->toBe('completed');
 });
 
