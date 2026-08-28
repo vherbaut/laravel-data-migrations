@@ -179,7 +179,23 @@ class DataMigrationsServiceProvider extends ServiceProvider
      */
     protected function registerMigrations(): void
     {
+        if ($this->trackingMigrationIsPublished()) {
+            return;
+        }
+
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+    }
+
+    /**
+     * Determine if the tracking table migration has been published into the application.
+     *
+     * @return bool
+     */
+    protected function trackingMigrationIsPublished(): bool
+    {
+        $published = glob(database_path('migrations').'/*_create_data_migrations_table.php');
+
+        return ! empty($published);
     }
 
     /**
@@ -189,6 +205,10 @@ class DataMigrationsServiceProvider extends ServiceProvider
      */
     protected function ensureMigrationPathExists(): void
     {
+        if (! $this->app->runningInConsole()) {
+            return;
+        }
+
         /** @var string $path */
         $path = config('data-migrations.path');
 

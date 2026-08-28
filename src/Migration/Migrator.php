@@ -101,6 +101,7 @@ class Migrator implements MigratorInterface
         }
 
         $batch = $this->repository->getNextBatchNumber();
+        $step = (bool) ($options['step'] ?? false);
 
         $this->note('<info>Running data migrations...</info>');
 
@@ -109,6 +110,10 @@ class Migrator implements MigratorInterface
         foreach ($migrations as $file) {
             $this->runMigration($file, $batch, $options);
             $ran[] = $file;
+
+            if ($step) {
+                $batch++;
+            }
         }
 
         return $ran;
@@ -289,9 +294,9 @@ class Migrator implements MigratorInterface
 
         // Determine which migrations to rollback
         if ($batch !== null) {
-            $migrations = $this->repository->getMigrationsByBatch($batch);
+            $migrations = $this->repository->getRollbackableByBatch($batch);
         } elseif ($steps > 0) {
-            $migrations = $this->repository->getMigrations($steps);
+            $migrations = $this->repository->getRollbackable($steps);
         } else {
             $migrations = $this->repository->getLast();
         }

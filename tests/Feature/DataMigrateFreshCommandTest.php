@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use Illuminate\Support\Facades\Schema;
+use Symfony\Component\Console\Exception\InvalidOptionException;
 
 beforeEach(function (): void {
     $this->artisan('migrate');
@@ -56,4 +57,31 @@ it('fails when migrations table does not exist', function (): void {
     $this->artisan('data:fresh', ['--force' => true])
         ->expectsOutputToContain('Data migrations table not found')
         ->assertFailed();
+});
+
+it('returns a failure exit code when a migration fails', function (): void {
+    $content = <<<'PHP'
+<?php
+
+use Vherbaut\DataMigrations\Migration\DataMigration;
+
+return new class extends DataMigration {
+    public function up(): void
+    {
+        throw new RuntimeException('Boom');
+    }
+};
+PHP;
+
+    $this->createTestMigration('failing_fresh', $content);
+
+    $this->artisan('data:fresh', ['--force' => true])
+        ->assertFailed();
+
+    $this->assertDatabaseHas('data_migrations', ['status' => 'failed']);
+});
+
+it('does not accept the --seed option', function (): void {
+    expect(fn () => $this->artisan('data:fresh', ['--force' => true, '--seed' => true]))
+        ->toThrow(InvalidOptionException::class);
 });

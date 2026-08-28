@@ -22,8 +22,7 @@ class DataMigrateFreshCommand extends Command
      * @var string
      */
     protected $signature = 'data:fresh
-                            {--force : Force the operation to run in production}
-                            {--seed : Seed the database after migrations}';
+                            {--force : Force the operation to run in production}';
 
     /**
      * The console command description.
@@ -83,12 +82,9 @@ class DataMigrateFreshCommand extends Command
 
         $this->newLine();
 
-        // Run all migrations
-        $this->call('data:migrate', [
+        return $this->call('data:migrate', [
             '--force' => $this->option('force'),
         ]);
-
-        return self::SUCCESS;
     }
 
     /**

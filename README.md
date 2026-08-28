@@ -163,7 +163,7 @@ class FixUserEmailsSeeder extends Seeder
 ## Requirements
 
 - PHP 8.2 or higher
-- Laravel 10.x, 11.x, or 12.x
+- Laravel 10.x, 11.x, 12.x, or 13.x
 - A supported database (MySQL, PostgreSQL, SQLite, SQL Server)
 
 ---
@@ -187,6 +187,16 @@ Run the migrations to create the tracking table:
 ```bash
 php artisan migrate
 ```
+
+### Optional: Publish the Tracking Migration
+
+The package loads the migration of its `data_migrations` table automatically. Publish it only if you need to customize it:
+
+```bash
+php artisan vendor:publish --tag=data-migrations-migrations
+```
+
+Once a published copy exists in `database/migrations` (even renamed with a new timestamp), the package stops loading its own copy.
 
 ### Optional: Publish Stubs
 
@@ -333,8 +343,12 @@ php artisan data:migrate [options]
 |--------|-------------|
 | `--dry-run` | Preview migrations without executing |
 | `--force` | Force execution in production environment |
-| `--step` | Run migrations one at a time |
+| `--step` | Assign a separate batch number to each migration so they can be rolled back individually |
 | `--no-confirm` | Skip row count confirmation prompts |
+
+#### Retrying failed or rolled back migrations
+
+Migrations recorded as `failed` or `rolled_back` are treated as pending: the next `data:migrate` runs them again and replaces the previous record. `data:rollback` only targets `completed` (or still `running`) migrations.
 
 ### data:rollback
 
@@ -387,7 +401,6 @@ php artisan data:fresh [options]
 | Option | Description |
 |--------|-------------|
 | `--force` | Force execution in production environment |
-| `--seed` | Run seeders after migrations (reserved) |
 
 > **Warning:** This command will delete all migration records and re-run every migration. Use with caution.
 
@@ -522,6 +535,8 @@ return new class extends DataMigration
     }
 };
 ```
+
+> **Note:** Generated migrations do not declare `down()`. A migration without `down()` is skipped by `data:rollback`. Do not add an empty `down()` method: it would mark the migration as rolled back without reverting any data.
 
 ### Using a Specific Database Connection
 

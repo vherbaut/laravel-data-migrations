@@ -6,7 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [1.1.0] - 2025-03-25
+## [1.1.2] - 2026-08-28
+
+### Fixed
+
+- `data:rollback --step=N` and `data:rollback --batch=N` only target `completed` or `running` migrations. They previously ran `down()` again on migrations already `rolled_back` or `failed` (the 1.0.3 fix only covered the default rollback)
+- `data:fresh` returns the exit code of the underlying `data:migrate` run instead of always reporting success
+- `data:migrate --step` assigns a separate batch number to each migration. The option was accepted but ignored
+- The package no longer loads its own tracking table migration when a published copy (`*_create_data_migrations_table.php`) exists in `database/migrations`. A renamed published copy previously caused a "table already exists" error on `php artisan migrate`
+- The data migrations directory is only created when running in the console, no longer on every HTTP request
+
+### Changed
+
+- Generated migrations no longer declare an empty `down()` method. An empty `down()` made every migration look reversible, so `data:rollback` marked it as `rolled_back` without reverting anything. **Remove empty `down()` methods from previously generated migrations** (and from published stubs in `stubs/`) so that `data:rollback` skips them
+- CI covers Laravel 13 and PHP 8.5, and runs on the `develop` branch
+
+### Added
+
+- `MigrationRepositoryInterface::getRollbackable()` and `getRollbackableByBatch()`. Custom repository implementations must implement them
+- Documentation for the `data-migrations-migrations` publish tag and for the retry behaviour introduced in 1.0.3
+
+### Removed
+
+- `data:fresh --seed` option, which was reserved and never implemented
+
+
+## [1.1.1] - 2026-03-26
+
+### Fixed
+
+- Code style compatibility with Laravel Pint 1.29
+
+
+## [1.1.0] - 2026-03-25
 
 ### Added
 
@@ -33,7 +65,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Migrator::rollbackMigration()` now returns `bool` instead of `void`
 
 
-## [1.0.0] - 2024-12-28
+## [1.0.2] - 2025-12-29
+
+### Fixed
+
+- Composer package metadata
+
+
+## [1.0.1] - 2025-12-28
+
+### Changed
+
+- Documentation and Composer metadata updates
+
+
+## [1.0.0] - 2025-12-28
 
 ### Added
 
@@ -66,7 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clean separation of concerns
 - Typed DTOs (`MigrationRecord`)
 
-[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/vherbaut/laravel-data-migrations/compare/v1.0.3...v1.1.0
-[1.0.3]: https://github.com/vherbaut/laravel-data-migrations/compare/v1.0.0...v1.0.3
-[1.0.0]: https://github.com/vherbaut/laravel-data-migrations/releases/tag/v1.0.0
+[Unreleased]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.1...HEAD
+[1.1.1]: https://github.com/vherbaut/laravel-data-migrations/compare/1.1.0...1.1.1
+[1.1.0]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.3...1.1.0
+[1.0.3]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.2...1.0.3
+[1.0.2]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.1...1.0.2
+[1.0.1]: https://github.com/vherbaut/laravel-data-migrations/compare/1.0.0...1.0.1
+[1.0.0]: https://github.com/vherbaut/laravel-data-migrations/releases/tag/1.0.0

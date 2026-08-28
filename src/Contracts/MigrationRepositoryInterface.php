@@ -43,6 +43,22 @@ interface MigrationRepositoryInterface
     public function getMigrationsByBatch(int $batch): Collection;
 
     /**
+     * Get the migrations that can be rolled back (completed or running), most recent first.
+     *
+     * @param int|null $steps
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getRollbackable(?int $steps = null): Collection;
+
+    /**
+     * Get the migrations of a batch that can be rolled back (completed or running).
+     *
+     * @param int $batch
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getRollbackableByBatch(int $batch): Collection;
+
+    /**
      * Log that a migration is starting.
      *
      * @param string $migration
