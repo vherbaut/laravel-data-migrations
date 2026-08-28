@@ -42,6 +42,13 @@ abstract class DataMigration implements MigrationInterface
     protected int $chunkSize = 1000;
 
     /**
+     * Key column used by the chunk helpers to paginate (chunkById, lazyById, keyset updates).
+     *
+     * @var string
+     */
+    protected string $chunkColumn = 'id';
+
+    /**
      * Whether this migration is idempotent (safe to run multiple times).
      *
      * @var bool
@@ -164,19 +171,21 @@ abstract class DataMigration implements MigrationInterface
     }
 
     /**
-     * Process records in chunks.
+     * Process records in chunks paginated by key.
      *
      * @param string $table
      * @param callable(object): void $callback
      * @param int|null $chunkSize
+     * @param string|null $column Key column, defaults to $chunkColumn.
      * @return int
      */
-    protected function chunk(string $table, callable $callback, ?int $chunkSize = null): int
+    protected function chunk(string $table, callable $callback, ?int $chunkSize = null, ?string $column = null): int
     {
         $processed = 0;
         $chunkSize = $chunkSize ?? $this->chunkSize;
+        $column = $column ?? $this->chunkColumn;
 
-        $this->db()->table($table)->orderBy('id')->chunk($chunkSize, function ($records) use ($callback, &$processed): bool {
+        $this->db()->table($table)->chunkById($chunkSize, function ($records) use ($callback, &$processed): bool {
             foreach ($records as $record) {
                 $callback($record);
                 $processed++;
@@ -184,25 +193,27 @@ abstract class DataMigration implements MigrationInterface
             }
 
             return true;
-        });
+        }, $column);
 
         return $processed;
     }
 
     /**
-     * Process records in chunks using lazy collection (memory efficient).
+     * Process records in chunks using a lazy collection paginated by key (memory efficient).
      *
      * @param string $table
      * @param callable(object): void $callback
      * @param int|null $chunkSize
+     * @param string|null $column Key column, defaults to $chunkColumn.
      * @return int
      */
-    protected function chunkLazy(string $table, callable $callback, ?int $chunkSize = null): int
+    protected function chunkLazy(string $table, callable $callback, ?int $chunkSize = null, ?string $column = null): int
     {
         $processed = 0;
         $chunkSize = $chunkSize ?? $this->chunkSize;
+        $column = $column ?? $this->chunkColumn;
 
-        foreach ($this->db()->table($table)->orderBy('id')->lazy($chunkSize) as $record) {
+        foreach ($this->db()->table($table)->lazyById($chunkSize, $column) as $record) {
             $callback($record);
             $processed++;
             $this->incrementProgress();
@@ -212,28 +223,49 @@ abstract class DataMigration implements MigrationInterface
     }
 
     /**
-     * Process with chunked updates (for mass updates).
+     * Process with chunked updates (for mass updates), walking the table by key.
+     *
+     * Each pass selects the keys of the next matching rows after the last one
+     * updated, then updates that key range. Every row is visited once, so the
+     * loop ends even when the update leaves the rows matching the predicate.
      *
      * @param string $table
      * @param array<string, mixed> $updates
      * @param callable(Builder): void $whereCallback
      * @param int|null $chunkSize
+     * @param string|null $column Key column, defaults to $chunkColumn.
      * @return int
      */
-    protected function chunkUpdate(string $table, array $updates, callable $whereCallback, ?int $chunkSize = null): int
+    protected function chunkUpdate(string $table, array $updates, callable $whereCallback, ?int $chunkSize = null, ?string $column = null): int
     {
         $totalAffected = 0;
         $chunkSize = $chunkSize ?? $this->chunkSize;
+        $column = $column ?? $this->chunkColumn;
+        $lastKey = null;
 
         do {
-            $query = $this->db()->table($table);
-            $whereCallback($query);
+            $selection = $this->db()->table($table);
+            $whereCallback($selection);
 
-            $affected = $query->limit($chunkSize)->update($updates);
+            if ($lastKey !== null) {
+                $selection->where($column, '>', $lastKey);
+            }
+
+            $keys = $selection->reorder($column)->limit($chunkSize)->pluck($column);
+
+            if ($keys->isEmpty()) {
+                break;
+            }
+
+            $update = $this->db()->table($table);
+            $whereCallback($update);
+
+            $affected = $update->whereBetween($column, [$keys->first(), $keys->last()])->update($updates);
             $totalAffected += $affected;
+            $lastKey = $keys->last();
 
             $this->addProgress($affected);
-        } while ($affected > 0);
+        } while ($keys->count() === $chunkSize);
 
         return $totalAffected;
     }

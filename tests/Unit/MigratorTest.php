@@ -230,3 +230,24 @@ it('notes a missing file on rollback and leaves the record untouched', function 
         ->and($this->migrator->getNotes())->toContain('<fg=yellow>Migration file not found:</> missing_migration')
         ->and(DB::table('data_migrations')->value('status'))->toBe('completed');
 });
+
+it('returns records whose migration file is missing as orphaned', function (): void {
+    $file = $this->createTestMigration('present', dataMigrationContent());
+    insertDataMigrationRecord(basename($file, '.php'), 1, 'completed');
+    insertDataMigrationRecord('vanished_completed', 1, 'completed');
+    insertDataMigrationRecord('vanished_failed', 2, 'failed');
+
+    expect($this->migrator->getOrphanedMigrations()->pluck('migration')->all())
+        ->toBe(['vanished_failed', 'vanished_completed']);
+});
+
+it('returns no orphaned migrations when every record has a file', function (): void {
+    $file = $this->createTestMigration('present', dataMigrationContent());
+    insertDataMigrationRecord(basename($file, '.php'), 1, 'completed');
+
+    expect($this->migrator->getOrphanedMigrations())->toBeEmpty();
+});
+
+it('returns no orphaned migrations when the table is empty', function (): void {
+    expect($this->migrator->getOrphanedMigrations())->toBeEmpty();
+});

@@ -306,6 +306,7 @@ Total : 2 | En attente : 1 | Terminées : 1 | Échouées : 0
 | `data:rollback` | Annuler le dernier lot de migrations |
 | `data:status` | Afficher le statut de toutes les migrations |
 | `data:fresh` | Réinitialiser et ré-exécuter toutes les migrations |
+| `data:prune` | Supprimer les enregistrements de suivi dont le fichier de migration n'existe plus |
 
 ### make:data-migration
 
@@ -394,6 +395,9 @@ php artisan data:status [options]
 |--------|-------------|
 | `--pending` | Afficher uniquement les migrations en attente |
 | `--ran` | Afficher uniquement les migrations terminées |
+| `--json` | Afficher la liste en tableau JSON (un objet par migration avec `name`, `status`, `batch`, `rows_affected`, `duration_ms`, `ran_at`, `orphaned`) |
+
+Les enregistrements dont le fichier de migration a été supprimé sont listés aussi, marqués `(orphaned)` dans la table et comptés dans la ligne de résumé. Supprimez-les avec `data:prune`.
 
 ### data:fresh
 
@@ -410,6 +414,20 @@ php artisan data:fresh [options]
 
 > **Attention :** Cette commande supprimera tous les enregistrements de migration et ré-exécutera chaque migration. À utiliser avec précaution.
 
+### data:prune
+
+Supprimer les enregistrements de suivi dont le fichier de migration n'existe plus (ceux que `data:status` marque comme orphelins).
+
+```bash
+php artisan data:prune [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Forcer l'exécution en environnement de production |
+
+La commande refuse de s'exécuter quand le répertoire des migrations ne contient aucun fichier alors que des enregistrements existent, afin qu'un `path` mal configuré ne puisse pas vider la table.
+
 ---
 
 ## Écrire des migrations de données
@@ -422,6 +440,7 @@ php artisan data:fresh [options]
 | `$affectedTables` | `array` | `[]` | Liste des tables modifiées par cette migration (documentation/sauvegarde) |
 | `$withinTransaction` | `bool` | `true` | Encapsuler la migration dans une transaction |
 | `$chunkSize` | `int` | `1000` | Taille de lot par défaut pour les opérations par lots |
+| `$chunkColumn` | `string` | `'id'` | Colonne clé utilisée par `chunk()`, `chunkLazy()` et `chunkUpdate()` pour paginer |
 | `$idempotent` | `bool` | `false` | Cette migration peut-elle être exécutée plusieurs fois sans danger |
 | `$connection` | `?string` | `null` | Connexion de base de données à utiliser (null = défaut) |
 | `$timeout` | `?int` | `0` | Temps d'exécution maximum en secondes (0 = config, null = illimité) |
@@ -608,13 +627,13 @@ $percentage = $this->getProgressPercentage();
 ### Traitement par lots
 
 ```php
-// Traiter les enregistrements un par un
+// Traiter les enregistrements un par un, paginés par clé (chunkById en interne)
 $processed = $this->chunk('table_name', function ($record) {
     // Traiter chaque enregistrement
     // La progression est automatiquement incrémentée
 });
 
-// Itération lazy économe en mémoire
+// Itération lazy économe en mémoire (lazyById en interne)
 $processed = $this->chunkLazy('table_name', function ($record) {
     // Traiter chaque enregistrement
 });
@@ -627,7 +646,12 @@ $affected = $this->chunkUpdate(
         $query->where('status', 'pending');
     }
 );
+
+// Taille de lot et colonne clé optionnelles (défauts : $chunkSize et $chunkColumn)
+$processed = $this->chunk('legacy_table', fn ($record) => $this->process($record), 500, 'legacy_id');
 ```
+
+Les trois helpers parcourent la table par clé : la colonne clé doit être unique et le callback ne doit pas la modifier. `chunkUpdate()` sélectionne les clés des prochaines lignes correspondantes puis met à jour cette plage de clés : chaque ligne est visitée une fois et la boucle se termine même si la mise à jour laisse les lignes dans le prédicat. Enveloppez les conditions `OR` dans une closure à l'intérieur du callback, comme avec `chunkById()`.
 
 ### Comptage des lignes
 
@@ -1145,6 +1169,7 @@ src/
 │   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigrateFreshCommand.php
+│   ├── DataMigratePruneCommand.php
 │   ├── DataMigrateRollbackCommand.php
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
@@ -1152,7 +1177,8 @@ src/
 │   └── TracksProgress.php       # Trait barre de progression
 ├── Contracts/                   # Interfaces
 ├── DTO/
-│   └── MigrationRecord.php      # Objet de transfert de données typé
+│   ├── MigrationRecord.php      # Objet de transfert de données typé
+│   └── MigrationStatus.php      # Ligne de data:status, forme JSON
 ├── Exceptions/
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php

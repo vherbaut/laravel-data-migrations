@@ -432,6 +432,23 @@ class Migrator implements MigratorInterface
     }
 
     /**
+     * Get the tracking records whose migration file no longer exists.
+     *
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getOrphanedMigrations(): Collection
+    {
+        $names = array_map(
+            fn (string $file): string => $this->getMigrationName($file),
+            $this->getMigrationFiles(),
+        );
+
+        return $this->repository->getMigrations()
+            ->reject(fn (MigrationRecord $record): bool => in_array($record->migration, $names, true))
+            ->values();
+    }
+
+    /**
      * Get all migration files.
      *
      * @return array<int, string>

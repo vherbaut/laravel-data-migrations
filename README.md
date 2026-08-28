@@ -306,6 +306,7 @@ Total: 2 | Pending: 1 | Completed: 1 | Failed: 0
 | `data:rollback` | Rollback the last batch of migrations |
 | `data:status` | Display the status of all migrations |
 | `data:fresh` | Reset and re-run all data migrations |
+| `data:prune` | Remove tracking records whose migration file no longer exists |
 
 ### make:data-migration
 
@@ -394,6 +395,9 @@ php artisan data:status [options]
 |--------|-------------|
 | `--pending` | Only show pending migrations |
 | `--ran` | Only show completed migrations |
+| `--json` | Print the list as a JSON array (one object per migration with `name`, `status`, `batch`, `rows_affected`, `duration_ms`, `ran_at`, `orphaned`) |
+
+Records whose migration file has been deleted are listed too, flagged `(orphaned)` in the table and counted in the summary line. Remove them with `data:prune`.
 
 ### data:fresh
 
@@ -410,6 +414,20 @@ php artisan data:fresh [options]
 
 > **Warning:** This command will delete all migration records and re-run every migration. Use with caution.
 
+### data:prune
+
+Delete the tracking records whose migration file no longer exists (the ones `data:status` flags as orphaned).
+
+```bash
+php artisan data:prune [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Force execution in production environment |
+
+The command refuses to run when the migrations directory contains no file at all while records exist, so a misconfigured `path` cannot wipe the table.
+
 ---
 
 ## Writing Data Migrations
@@ -422,6 +440,7 @@ php artisan data:fresh [options]
 | `$affectedTables` | `array` | `[]` | List of tables this migration modifies (for documentation/backup) |
 | `$withinTransaction` | `bool` | `true` | Whether to wrap the migration in a database transaction |
 | `$chunkSize` | `int` | `1000` | Default chunk size for chunked operations |
+| `$chunkColumn` | `string` | `'id'` | Key column used by `chunk()`, `chunkLazy()` and `chunkUpdate()` to paginate |
 | `$idempotent` | `bool` | `false` | Whether this migration is safe to run multiple times |
 | `$connection` | `?string` | `null` | Database connection to use (null = default) |
 | `$timeout` | `?int` | `0` | Maximum execution time in seconds (0 = use config, null = unlimited) |
@@ -608,13 +627,13 @@ $percentage = $this->getProgressPercentage();
 ### Chunk Processing
 
 ```php
-// Process records one at a time
+// Process records one at a time, paginated by key (chunkById under the hood)
 $processed = $this->chunk('table_name', function ($record) {
     // Process each record
     // Progress is automatically incremented
 });
 
-// Memory-efficient lazy iteration
+// Memory-efficient lazy iteration (lazyById under the hood)
 $processed = $this->chunkLazy('table_name', function ($record) {
     // Process each record
 });
@@ -627,7 +646,12 @@ $affected = $this->chunkUpdate(
         $query->where('status', 'pending');
     }
 );
+
+// Optional chunk size and key column (defaults: $chunkSize and $chunkColumn)
+$processed = $this->chunk('legacy_table', fn ($record) => $this->process($record), 500, 'legacy_id');
 ```
+
+All three helpers walk the table by key, so the key column must be unique and the callback must not change it. `chunkUpdate()` selects the keys of the next matching rows, then updates that key range: every row is visited once and the loop ends even when the update leaves the rows matching the predicate. Wrap `OR` conditions in a closure inside the callback, as with `chunkById()`.
 
 ### Row Counting
 
@@ -1145,6 +1169,7 @@ src/
 │   │   └── IsolatesDataMigrations.php
 │   ├── DataMigrateCommand.php
 │   ├── DataMigrateFreshCommand.php
+│   ├── DataMigratePruneCommand.php
 │   ├── DataMigrateRollbackCommand.php
 │   ├── DataMigrateStatusCommand.php
 │   └── MakeDataMigrationCommand.php
@@ -1152,7 +1177,8 @@ src/
 │   └── TracksProgress.php       # Progress bar trait
 ├── Contracts/                   # Interfaces
 ├── DTO/
-│   └── MigrationRecord.php      # Typed data transfer object
+│   ├── MigrationRecord.php      # Typed data transfer object
+│   └── MigrationStatus.php      # Row of data:status, JSON shape
 ├── Exceptions/
 │   ├── MigrationException.php
 │   ├── MigrationNotFoundException.php

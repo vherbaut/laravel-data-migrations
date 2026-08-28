@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Vherbaut\DataMigrations\Facades;
 
 use Illuminate\Console\OutputStyle;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Facade;
 use Vherbaut\DataMigrations\Contracts\MigrationInterface;
 use Vherbaut\DataMigrations\Contracts\MigrationRepositoryInterface;
 use Vherbaut\DataMigrations\Contracts\MigratorInterface;
+use Vherbaut\DataMigrations\DTO\MigrationRecord;
 
 /**
  * Facade for the data migrations service.
@@ -17,6 +19,7 @@ use Vherbaut\DataMigrations\Contracts\MigratorInterface;
  * @method static void runMigration(string $file, int $batch, array<string, mixed> $options = []) Run a single migration
  * @method static array<int, string> rollback(array<string, mixed> $options = []) Rollback the last batch
  * @method static array<int, string> getPendingMigrations() Get pending migrations
+ * @method static Collection<int, MigrationRecord> getOrphanedMigrations() Get the records whose file no longer exists
  * @method static array<int, string> getMigrationFiles() Get all migration files
  * @method static MigrationInterface resolve(string $file) Resolve a migration instance
  * @method static string getMigrationName(string $file) Get migration name from file path

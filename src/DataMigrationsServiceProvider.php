@@ -9,6 +9,7 @@ use Illuminate\Support\ServiceProvider;
 use Spatie\Backup\BackupServiceProvider;
 use Vherbaut\DataMigrations\Commands\DataMigrateCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateFreshCommand;
+use Vherbaut\DataMigrations\Commands\DataMigratePruneCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateRollbackCommand;
 use Vherbaut\DataMigrations\Commands\DataMigrateStatusCommand;
 use Vherbaut\DataMigrations\Commands\MakeDataMigrationCommand;
@@ -184,6 +185,7 @@ class DataMigrationsServiceProvider extends ServiceProvider
                 DataMigrateRollbackCommand::class,
                 DataMigrateStatusCommand::class,
                 DataMigrateFreshCommand::class,
+                DataMigratePruneCommand::class,
             ]);
         }
     }

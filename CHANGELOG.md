@@ -12,9 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Events `DataMigrationStarted`, `DataMigrationEnded`, `DataMigrationFailed` and `NoPendingDataMigrations`, dispatched by the migrator around `up()` and `down()` (never during a dry run). `Migrator` accepts an optional event dispatcher as fifth constructor argument
 - `--isolated[=CODE]` option on `data:migrate`, `data:rollback` and `data:fresh`, backed by a single cache lock shared by the three commands, with a new `lock` config block (`enabled`, `store`, `ttl`)
+- `data:status --json`, printing the status list as a JSON array. `data:status` also lists the tracking records whose migration file no longer exists, flagged `(orphaned)` and counted in the summary line
+- `data:prune` command deleting those orphaned records. It refuses to run when the migrations directory contains no file at all while records exist
+- `MigratorInterface::getOrphanedMigrations()`. Custom migrator implementations must implement it
+- `$chunkColumn` property (default `'id'`) and optional trailing `$column` parameter on `chunk()`, `chunkLazy()` and `chunkUpdate()` to paginate by another key
 - Tests covering `Migrator` (transaction modes, timeout, backup, dry run), the `MigrationRepository` logging methods and the `chunk*()` helpers
 - `.gitattributes` with `export-ignore` entries so that tests, CI and tooling files are left out of the distribution archive
 - `suggest` entry for `spatie/laravel-backup`, required by the `safety.auto_backup` option
+
+### Changed
+
+- `chunk()` and `chunkLazy()` paginate by key (`chunkById()` and `lazyById()`) instead of by offset, and `chunkUpdate()` walks the table by key range instead of issuing `UPDATE ... LIMIT`, which some drivers do not support. A subclass overriding one of these protected helpers must add the trailing `?string $column = null` parameter
+- The `data:status` summary line ends with an `Orphaned:` count
+
+### Fixed
+
+- `chunkUpdate()` looped forever when the update did not remove the rows from the predicate
+- `chunk()` could skip rows when the callback moved them out of the result set, a side effect of offset pagination
+- The PHPStan baseline is gone: `DataMigrateStatusCommand` builds typed `MigrationStatus` objects instead of array shapes
 
 
 ## [1.1.2] - 2026-08-28
