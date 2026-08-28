@@ -80,7 +80,7 @@ class DataMigrateRollbackCommand extends Command
 
         if ($batchOption !== null) {
             $batch = (int) $batchOption;
-            $migrations = $this->migrator->getRepository()->getMigrationsByBatch($batch);
+            $migrations = $this->migrator->getRepository()->getRollbackableByBatch($batch);
 
             if ($migrations->isEmpty()) {
                 $this->warn("No migrations found for batch {$batch}.");

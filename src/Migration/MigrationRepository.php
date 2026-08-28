@@ -18,6 +18,13 @@ use Vherbaut\DataMigrations\DTO\MigrationRecord;
 class MigrationRepository implements MigrationRepositoryInterface
 {
     /**
+     * Statuses of migrations that can be rolled back.
+     *
+     * @var array<int, string>
+     */
+    protected const ROLLBACKABLE_STATUSES = ['completed', 'running'];
+
+    /**
      * The database connection resolver.
      *
      * @var ConnectionResolverInterface
@@ -58,7 +65,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     public function getRan(): array
     {
         return $this->table()
-            ->whereIn('status', ['completed', 'running'])
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
             ->orderBy('batch')
             ->orderBy('migration')
             ->pluck('migration')
@@ -94,7 +101,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     public function getLast(): Collection
     {
         $lastBatch = $this->table()
-            ->whereIn('status', ['completed', 'running'])
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
             ->max('batch');
 
         if ($lastBatch === null) {
@@ -103,7 +110,7 @@ class MigrationRepository implements MigrationRepositoryInterface
 
         return $this->table()
             ->where('batch', $lastBatch)
-            ->whereIn('status', ['completed', 'running'])
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
             ->orderByDesc('migration')
             ->get()
             ->map(
@@ -121,6 +128,46 @@ class MigrationRepository implements MigrationRepositoryInterface
     {
         return $this->table()
             ->where('batch', $batch)
+            ->orderByDesc('migration')
+            ->get()
+            ->map(
+                fn (object $record): MigrationRecord => MigrationRecord::fromDatabaseRecord($record)
+            );
+    }
+
+    /**
+     * Get the migrations that can be rolled back (completed or running), most recent first.
+     *
+     * @param int|null $steps
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getRollbackable(?int $steps = null): Collection
+    {
+        $query = $this->table()
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
+            ->orderByDesc('batch')
+            ->orderByDesc('migration');
+
+        if ($steps !== null) {
+            $query->limit($steps);
+        }
+
+        return $query->get()->map(
+            fn (object $record): MigrationRecord => MigrationRecord::fromDatabaseRecord($record)
+        );
+    }
+
+    /**
+     * Get the migrations of a batch that can be rolled back (completed or running).
+     *
+     * @param int $batch
+     * @return Collection<int, MigrationRecord>
+     */
+    public function getRollbackableByBatch(int $batch): Collection
+    {
+        return $this->table()
+            ->where('batch', $batch)
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
             ->orderByDesc('migration')
             ->get()
             ->map(
@@ -273,7 +320,7 @@ class MigrationRepository implements MigrationRepositoryInterface
     {
         return $this->table()
             ->where('migration', $migration)
-            ->whereIn('status', ['completed', 'running'])
+            ->whereIn('status', self::ROLLBACKABLE_STATUSES)
             ->exists();
     }
 
